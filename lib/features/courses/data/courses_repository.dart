@@ -1,39 +1,146 @@
-import 'package:dio/dio.dart';
-
-import '../../../core/api/api_client.dart';
-import '../../../core/storage/secure_storage.dart';
+import '../../../core/api/authenticated_api.dart';
 
 class CoursesRepository {
-  final ApiClient _api = ApiClient();
-  final SecureStorage _storage = SecureStorage();
+  CoursesRepository({AuthenticatedApi? api}) : _api = api ?? AuthenticatedApi();
+
+  final AuthenticatedApi _api;
 
   Future<List<dynamic>> getCourses() async {
-    final token = await _storage.getToken();
-
-    final response = await _api.dio.get(
-      '/courses',
-      options: Options(
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      ),
-    );
-
+    final response = await _api.get('/courses');
     return response.data as List<dynamic>;
   }
 
   Future<List<dynamic>> getCourseContents(int courseId) async {
-    final token = await _storage.getToken();
-
-    final response = await _api.dio.get(
-      '/courses/$courseId',
-      options: Options(
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      ),
-    );
-
+    final response = await _api.get('/courses/$courseId');
     return response.data as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getAdministration(int courseId) async {
+    final response = await _api.get('/courses/$courseId/administration');
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<List<dynamic>> getCategories() async {
+    final response = await _api.get('/courses/categories');
+    return response.data as List<dynamic>;
+  }
+
+  Future<dynamic> createCourse({
+    required String fullname,
+    required String shortname,
+    int categoryid = 1,
+    String summary = '',
+  }) async {
+    final response = await _api.post('/courses', data: {
+      'fullname': fullname,
+      'shortname': shortname,
+      'categoryid': categoryid,
+      'summary': summary,
+    });
+    return response.data;
+  }
+
+  Future<dynamic> updateCourse(
+    int courseId, {
+    String? fullname,
+    String? shortname,
+    String? summary,
+    int? visible,
+  }) async {
+    final response = await _api.patch('/courses/$courseId', data: {
+      if (fullname != null) 'fullname': fullname,
+      if (shortname != null) 'shortname': shortname,
+      if (summary != null) 'summary': summary,
+      if (visible != null) 'visible': visible,
+    });
+    return response.data;
+  }
+
+  Future<dynamic> deleteCourse(int courseId) async {
+    final response = await _api.delete('/courses/$courseId');
+    return response.data;
+  }
+
+  Future<dynamic> duplicateCourse(
+    int courseId, {
+    required String fullname,
+    required String shortname,
+  }) async {
+    final response = await _api.post('/courses/$courseId/duplicate', data: {
+      'fullname': fullname,
+      'shortname': shortname,
+    });
+    return response.data;
+  }
+
+  Future<dynamic> sectionAction(
+    int courseId, {
+    required String action,
+    List<int> sectionIds = const [],
+    int? targetSectionId,
+  }) async {
+    final response = await _api.post('/courses/$courseId/sections', data: {
+      'action': action,
+      'section_ids': sectionIds,
+      'target_section_id': targetSectionId,
+    });
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> renameSectionUnsupported(
+    int courseId,
+    int sectionId,
+  ) async {
+    final response =
+        await _api.post('/courses/$courseId/sections/$sectionId/rename');
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<dynamic> moduleAction(
+    int courseId, {
+    required String action,
+    required int cmid,
+    int? targetSectionId,
+    int? targetCmid,
+  }) async {
+    final response = await _api.post('/courses/$courseId/modules/actions', data: {
+      'action': action,
+      'cmid': cmid,
+      'target_section_id': targetSectionId,
+      'target_cmid': targetCmid,
+    });
+    return response.data;
+  }
+
+  Future<dynamic> createModule(
+    int courseId, {
+    required String modname,
+    required int sectionId,
+  }) async {
+    final response = await _api.post('/courses/$courseId/modules', data: {
+      'modname': modname,
+      'section_id': sectionId,
+    });
+    return response.data;
+  }
+
+  Future<List<dynamic>> getParticipants(int courseId) async {
+    final response = await _api.get('/courses/$courseId/participants');
+    return response.data as List<dynamic>;
+  }
+
+  Future<List<dynamic>> getGroups(int courseId) async {
+    final response = await _api.get('/courses/$courseId/groups');
+    return response.data as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getCompletion(int courseId) async {
+    final response = await _api.get('/courses/$courseId/completion');
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> getGrades(int courseId) async {
+    final response = await _api.get('/courses/$courseId/grades');
+    return Map<String, dynamic>.from(response.data as Map);
   }
 }

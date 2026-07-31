@@ -1,6 +1,10 @@
 import 'package:dio/dio.dart';
 
 class ApiClient {
+  // Local development backend
+  // static const String baseUrl = "http://127.0.0.1:8000";
+
+  // Production / Oracle backend
   static const String baseUrl = "https://api.espace.levanzed.fyi";
 
   late final Dio dio;

@@ -7,15 +7,31 @@ import 'widgets/activity_layout.dart';
 import 'widgets/activity_utils.dart';
 import 'widgets/html_content.dart';
 
-class ForumRenderer extends StatefulWidget {
-  final Activity activity;
-  final ActivityRepository repository;
+class ForumRendererAdapter extends ActivityRenderer {
+  const ForumRendererAdapter();
 
+  @override
+  Widget build(
+    BuildContext context,
+    Activity activity, {
+    ActivityRepository? repository,
+  }) {
+    return ForumRenderer(
+      activity: activity,
+      repository: repository ?? ActivityRepository(),
+    );
+  }
+}
+
+class ForumRenderer extends StatefulWidget {
   const ForumRenderer({
     super.key,
     required this.activity,
     required this.repository,
   });
+
+  final Activity activity;
+  final ActivityRepository repository;
 
   @override
   State<ForumRenderer> createState() => _ForumRendererState();
@@ -23,11 +39,52 @@ class ForumRenderer extends StatefulWidget {
 
 class _ForumRendererState extends State<ForumRenderer> {
   late Future<Map<String, dynamic>> _discussionsFuture;
+  final _subjectController = TextEditingController();
+  final _messageController = TextEditingController();
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    _discussionsFuture = widget.repository.getForumDiscussions(widget.activity.id);
+    _reload();
+  }
+
+  void _reload() {
+    _discussionsFuture =
+        widget.repository.getForumDiscussions(widget.activity.id);
+  }
+
+  @override
+  void dispose() {
+    _subjectController.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _createDiscussion() async {
+    if (_subjectController.text.trim().isEmpty ||
+        _messageController.text.trim().isEmpty) {
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await widget.repository.createForumDiscussion(
+        widget.activity.id,
+        subject: _subjectController.text.trim(),
+        message: _messageController.text.trim(),
+      );
+      _subjectController.clear();
+      _messageController.clear();
+      setState(_reload);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -43,10 +100,25 @@ class _ForumRendererState extends State<ForumRenderer> {
           html: forum['intro']?.toString() ?? widget.activity.description,
         ),
         const SizedBox(height: 20),
-        Text(
-          'Discussions',
-          style: Theme.of(context).textTheme.titleMedium,
+        Text('New discussion', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _subjectController,
+          decoration: const InputDecoration(labelText: 'Subject'),
         ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _messageController,
+          maxLines: 4,
+          decoration: const InputDecoration(labelText: 'Message'),
+        ),
+        const SizedBox(height: 8),
+        FilledButton(
+          onPressed: _busy ? null : _createDiscussion,
+          child: const Text('Post discussion'),
+        ),
+        const SizedBox(height: 24),
+        Text('Discussions', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         FutureBuilder<Map<String, dynamic>>(
           future: _discussionsFuture,
@@ -54,7 +126,6 @@ class _ForumRendererState extends State<ForumRenderer> {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
-
             if (snapshot.hasError) {
               return Card(
                 child: ListTile(
@@ -80,7 +151,8 @@ class _ForumRendererState extends State<ForumRenderer> {
             return Column(
               children: discussions.map((discussion) {
                 final map = Map<String, dynamic>.from(discussion as Map);
-                final discussionId = map['discussion'] as int? ?? map['id'] as int?;
+                final discussionId =
+                    map['discussion'] as int? ?? map['id'] as int?;
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -118,15 +190,15 @@ class _ForumRendererState extends State<ForumRenderer> {
 }
 
 class _DiscussionPosts extends StatefulWidget {
-  final int cmid;
-  final int discussionId;
-  final ActivityRepository repository;
-
   const _DiscussionPosts({
     required this.cmid,
     required this.discussionId,
     required this.repository,
   });
+
+  final int cmid;
+  final int discussionId;
+  final ActivityRepository repository;
 
   @override
   State<_DiscussionPosts> createState() => _DiscussionPostsState();
@@ -134,6 +206,7 @@ class _DiscussionPosts extends StatefulWidget {
 
 class _DiscussionPostsState extends State<_DiscussionPosts> {
   late Future<Map<String, dynamic>> _postsFuture;
+  final _replyController = TextEditingController();
 
   @override
   void initState() {
@@ -142,6 +215,29 @@ class _DiscussionPostsState extends State<_DiscussionPosts> {
       widget.cmid,
       widget.discussionId,
     );
+  }
+
+  @override
+  void dispose() {
+    _replyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reply(int parentPostId) async {
+    if (_replyController.text.trim().isEmpty) return;
+    await widget.repository.replyForumPost(
+      widget.cmid,
+      parentPostId,
+      subject: 'Re:',
+      message: _replyController.text.trim(),
+    );
+    _replyController.clear();
+    setState(() {
+      _postsFuture = widget.repository.getForumDiscussionPosts(
+        widget.cmid,
+        widget.discussionId,
+      );
+    });
   }
 
   @override
@@ -155,7 +251,6 @@ class _DiscussionPostsState extends State<_DiscussionPosts> {
             child: CircularProgressIndicator(),
           );
         }
-
         if (snapshot.hasError) {
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -164,35 +259,59 @@ class _DiscussionPostsState extends State<_DiscussionPosts> {
         }
 
         final posts = List<dynamic>.from(snapshot.data?['posts'] ?? const []);
+        final firstPostId = posts.isNotEmpty
+            ? Map<String, dynamic>.from(posts.first as Map)['id'] as int?
+            : null;
 
         return Column(
-          children: posts.map((post) {
-            final map = Map<String, dynamic>.from(post as Map);
-            return ListTile(
-              title: Text(map['subject']?.toString() ?? 'Post'),
-              subtitle: HtmlContent(
-                html: map['message']?.toString() ?? '',
+          children: [
+            ...posts.map((post) {
+              final map = Map<String, dynamic>.from(post as Map);
+              final postId = map['id'] as int?;
+              return ListTile(
+                title: Text(map['subject']?.toString() ?? 'Post'),
+                subtitle: HtmlContent(html: map['message']?.toString() ?? ''),
+                trailing: postId == null
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () async {
+                          await widget.repository
+                              .deleteForumPost(widget.cmid, postId);
+                          setState(() {
+                            _postsFuture =
+                                widget.repository.getForumDiscussionPosts(
+                              widget.cmid,
+                              widget.discussionId,
+                            );
+                          });
+                        },
+                      ),
+              );
+            }),
+            if (firstPostId != null)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _replyController,
+                      decoration: const InputDecoration(labelText: 'Reply'),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton(
+                        onPressed: () => _reply(firstPostId),
+                        child: const Text('Reply'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            );
-          }).toList(),
+          ],
         );
       },
-    );
-  }
-}
-
-class ForumRendererAdapter extends ActivityRenderer {
-  const ForumRendererAdapter();
-
-  @override
-  Widget build(
-    BuildContext context,
-    Activity activity, {
-    ActivityRepository? repository,
-  }) {
-    return ForumRenderer(
-      activity: activity,
-      repository: repository ?? ActivityRepository(),
     );
   }
 }

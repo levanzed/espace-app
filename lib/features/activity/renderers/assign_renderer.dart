@@ -17,82 +17,169 @@ class AssignRenderer extends ActivityRenderer {
     Activity activity, {
     ActivityRepository? repository,
   }) {
-    final assignment = Map<String, dynamic>.from(
-      activity.details['assignment'] as Map? ?? const {},
+    return _AssignView(
+      activity: activity,
+      repository: repository ?? ActivityRepository(),
     );
-    final status = Map<String, dynamic>.from(
-      activity.details['submission_status'] as Map? ?? const {},
-    );
+  }
+}
 
-    final dueDate = assignment['duedate'] as int?;
-    final allowFrom = assignment['allowsubmissionsfromdate'] as int?;
-    final submission = Map<String, dynamic>.from(
-      status['lastattempt']?['submission'] as Map? ?? const {},
+class _AssignView extends StatefulWidget {
+  const _AssignView({
+    required this.activity,
+    required this.repository,
+  });
+
+  final Activity activity;
+  final ActivityRepository repository;
+
+  @override
+  State<_AssignView> createState() => _AssignViewState();
+}
+
+class _AssignViewState extends State<_AssignView> {
+  final _controller = TextEditingController();
+  bool _busy = false;
+  String? _message;
+
+  Map<String, dynamic> get _assignment => Map<String, dynamic>.from(
+        widget.activity.details['assignment'] as Map? ?? const {},
+      );
+
+  Map<String, dynamic> get _status => Map<String, dynamic>.from(
+        widget.activity.details['submission_status'] as Map? ?? const {},
+      );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save({bool submit = false}) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      if (_controller.text.trim().isNotEmpty) {
+        await widget.repository.saveAssignSubmission(
+          widget.activity.id,
+          onlinetext: _controller.text.trim(),
+        );
+      }
+      if (submit) {
+        await widget.repository.submitAssign(widget.activity.id);
+      }
+      setState(() {
+        _message = submit ? 'Submitted for grading.' : 'Draft saved.';
+      });
+    } catch (error) {
+      setState(() => _message = error.toString());
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final feedback = Map<String, dynamic>.from(
+      _status['feedback'] as Map? ?? const {},
     );
-    final submissionStatus = status['status']?.toString() ?? 'unknown';
+    final submissionStatus = _status['status']?.toString() ?? 'unknown';
 
     return ActivityLayout(
-      activity: activity,
+      activity: widget.activity,
       children: [
         HtmlContent(
-          html: assignment['intro']?.toString() ?? activity.description,
+          html: _assignment['intro']?.toString() ?? widget.activity.description,
         ),
         const SizedBox(height: 20),
         _InfoCard(
           icon: Icons.schedule_rounded,
           title: 'Opens',
-          value: formatTimestamp(allowFrom),
+          value: formatTimestamp(_assignment['allowsubmissionsfromdate'] as int?),
         ),
         _InfoCard(
           icon: Icons.event_rounded,
           title: 'Due date',
-          value: formatTimestamp(dueDate),
+          value: formatTimestamp(_assignment['duedate'] as int?),
         ),
         _InfoCard(
           icon: Icons.upload_file_rounded,
           title: 'Submission status',
           value: submissionStatus.replaceAll('_', ' ').toUpperCase(),
         ),
-        if (submission.isNotEmpty) ...[
-          const SizedBox(height: 8),
+        if (feedback.isNotEmpty)
           Card(
+            margin: const EdgeInsets.only(bottom: 12),
             child: ListTile(
-              leading: const Icon(Icons.task_alt_rounded),
-              title: const Text('Latest submission'),
-              subtitle: Text(
-                'Status: ${submission['status'] ?? submissionStatus}',
+              leading: const Icon(Icons.feedback_outlined),
+              title: const Text('Feedback'),
+              subtitle: HtmlContent(
+                html: feedback['plugins'] != null
+                    ? feedback.toString()
+                    : (feedback['grade']?.toString() ?? 'Available'),
               ),
             ),
           ),
-        ],
-        const SizedBox(height: 12),
         ContentFileList(
-          contents: activity.contents,
+          contents: widget.activity.contents,
           emptyMessage: 'No assignment files attached',
         ),
-        if (activity.url != null && activity.url!.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: () => openExternalUrl(activity.url),
-            icon: const Icon(Icons.open_in_browser_rounded),
-            label: const Text('Open in Moodle'),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _controller,
+          maxLines: 6,
+          decoration: const InputDecoration(
+            labelText: 'Online text submission',
+            alignLabelWithHint: true,
           ),
-        ],
+        ),
+        const SizedBox(height: 12),
+        if (_message != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(_message!),
+          ),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _busy ? null : () => _save(submit: false),
+                child: const Text('Save draft'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                onPressed: _busy ? null : () => _save(submit: true),
+                child: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Submit'),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
 }
 
 class _InfoCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String value;
-
   const _InfoCard({
     required this.icon,
     required this.title,
     required this.value,
   });
+
+  final IconData icon;
+  final String title;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
