@@ -246,6 +246,8 @@ class _CourseScreenState extends State<CourseScreen> {
               final section = sections[index];
               final sectionId = section['id'] as int? ?? 0;
               final modules = (section['modules'] as List<dynamic>? ?? []);
+              final sectionVisible = section['visible'] == 1 ||
+                  section['visible'] == true;
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -268,18 +270,20 @@ class _CourseScreenState extends State<CourseScreen> {
                         ),
                       ),
                       if (_teacherMode) ...[
-                        IconButton(
-                          tooltip: 'Hide section',
-                          onPressed: () =>
-                              _sectionVisibility(sectionId, hide: true),
-                          icon: const Icon(Icons.visibility_off_outlined),
-                        ),
-                        IconButton(
-                          tooltip: 'Show section',
-                          onPressed: () =>
-                              _sectionVisibility(sectionId, hide: false),
-                          icon: const Icon(Icons.visibility_outlined),
-                        ),
+                        if (sectionVisible)
+                          IconButton(
+                            tooltip: 'Hide section',
+                            onPressed: () =>
+                                _sectionVisibility(sectionId, hide: true),
+                            icon: const Icon(Icons.visibility_off_outlined),
+                          )
+                        else
+                          IconButton(
+                            tooltip: 'Show section',
+                            onPressed: () =>
+                                _sectionVisibility(sectionId, hide: false),
+                            icon: const Icon(Icons.visibility_outlined),
+                          ),
                         IconButton(
                           tooltip: 'Add module',
                           onPressed: () => _showCreateModuleSheet(sectionId),
