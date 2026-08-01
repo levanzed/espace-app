@@ -78,11 +78,17 @@ class CoursesRepository {
     required String action,
     List<int> sectionIds = const [],
     int? targetSectionId,
+    String? name,
+    String? summary,
+    int summaryformat = 1,
   }) async {
     final response = await _api.post('/courses/$courseId/sections', data: {
       'action': action,
       'section_ids': sectionIds,
       'target_section_id': targetSectionId,
+      if (name != null) 'name': name,
+      if (summary != null) 'summary': summary,
+      'summaryformat': summaryformat,
     });
     return response.data;
   }
@@ -90,14 +96,16 @@ class CoursesRepository {
   Future<Map<String, dynamic>> renameSection(
     int courseId,
     int sectionId, {
-    required String name,
+    String? name,
     String? summary,
+    int summaryformat = 1,
   }) async {
     final response = await _api.post(
       '/courses/$courseId/sections/$sectionId/rename',
       data: {
-        'name': name,
+        if (name != null) 'name': name,
         if (summary != null) 'summary': summary,
+        'summaryformat': summaryformat,
       },
     );
     return Map<String, dynamic>.from(response.data as Map);
@@ -129,6 +137,45 @@ class CoursesRepository {
       'section_id': sectionId,
     });
     return response.data;
+  }
+
+  /// Create an activity via Activities API (Sprint A: assign).
+  Future<Map<String, dynamic>> createActivity(
+    int courseId, {
+    required int sectionId,
+    required String modname,
+    required Map<String, dynamic> settings,
+  }) async {
+    final response = await _api.post(
+      '/courses/$courseId/sections/$sectionId/activities',
+      data: {
+        'modname': modname,
+        'settings': settings,
+      },
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Update activity authoring settings.
+  Future<Map<String, dynamic>> updateActivity(
+    int courseId,
+    int cmid, {
+    required Map<String, dynamic> settings,
+  }) async {
+    final response = await _api.put(
+      '/courses/$courseId/activities/$cmid',
+      data: {'settings': settings},
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Load authoring settings for the editor.
+  Future<Map<String, dynamic>> getActivityAuthoring(
+    int courseId,
+    int cmid,
+  ) async {
+    final response = await _api.get('/courses/$courseId/activities/$cmid');
+    return Map<String, dynamic>.from(response.data as Map);
   }
 
   Future<List<dynamic>> getParticipants(int courseId) async {

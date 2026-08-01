@@ -148,4 +148,37 @@ class ActivityRepository {
     );
     return response.data;
   }
+
+  // ---- Teacher authoring file helpers (Activity subsystem) ----
+
+  /// Moodle user draft area descriptor from GET /files/draft-itemid.
+  Future<Map<String, dynamic>> getDraftItemId() async {
+    final response = await _api.get('/files/draft-itemid');
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Upload base64 content into a Moodle draft (or other) file area.
+  Future<Map<String, dynamic>> uploadDraftFile({
+    required String filecontentBase64,
+    required String filename,
+    required int contextid,
+    required int itemid,
+    String component = 'user',
+    String filearea = 'draft',
+    String filepath = '/',
+  }) async {
+    final response = await _api.post(
+      '/files/upload',
+      data: {
+        'filecontent_base64': filecontentBase64,
+        'filename': filename,
+        'contextid': contextid,
+        'component': component,
+        'filearea': filearea,
+        'itemid': itemid,
+        'filepath': filepath,
+      },
+    );
+    return Map<String, dynamic>.from(response.data as Map? ?? {});
+  }
 }

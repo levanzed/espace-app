@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../activity/authoring/activity_picker.dart';
+import '../../activity/authoring/assignment_editor_screen.dart';
 import '../../activity/presentation/activity_screen.dart';
+import '../../activity/renderers/widgets/html_content.dart';
 import '../data/courses_repository.dart';
 
 class CourseScreen extends StatefulWidget {
@@ -101,33 +104,18 @@ class _CourseScreenState extends State<CourseScreen> {
   }
 
   Future<void> _addSection() async {
-    await _repository.sectionAction(
-      widget.courseId,
-      action: 'section_add',
-    );
-    setState(_reload);
-  }
-
-  Future<void> _sectionVisibility(int sectionId, {required bool hide}) async {
-    await _repository.sectionAction(
-      widget.courseId,
-      action: hide ? 'section_hide' : 'section_show',
-      sectionIds: [sectionId],
-    );
-    setState(_reload);
-  }
-
-  Future<void> _renameSection(int sectionId, String currentName) async {
-    final controller = TextEditingController(text: currentName);
+    final nameController = TextEditingController();
+    final summaryController = TextEditingController();
 
     Future<void> submit(BuildContext dialogContext) async {
-      final name = controller.text.trim();
-      if (name.isEmpty) return;
+      final name = nameController.text.trim();
+      final summary = summaryController.text.trim();
       try {
-        await _repository.renameSection(
+        await _repository.sectionAction(
           widget.courseId,
-          sectionId,
-          name: name,
+          action: 'section_add',
+          name: name.isEmpty ? null : name,
+          summary: summary.isEmpty ? null : summary,
         );
         if (dialogContext.mounted) {
           Navigator.pop(dialogContext, true);
@@ -140,16 +128,33 @@ class _CourseScreenState extends State<CourseScreen> {
       }
     }
 
-    final renamed = await showDialog<bool>(
+    final created = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Rename section'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: 'Section name'),
-            onSubmitted: (_) => submit(dialogContext),
+          title: const Text('Add section'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Section name (optional)',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: summaryController,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Description (optional)',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -165,12 +170,102 @@ class _CourseScreenState extends State<CourseScreen> {
       },
     );
 
-    // Dispose after the dialog route has finished tearing down its TextField.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      controller.dispose();
+      nameController.dispose();
+      summaryController.dispose();
     });
 
-    if (renamed == true && mounted) {
+    if (created == true && mounted) {
+      setState(_reload);
+    }
+  }
+
+  Future<void> _sectionVisibility(int sectionId, {required bool hide}) async {
+    await _repository.sectionAction(
+      widget.courseId,
+      action: hide ? 'section_hide' : 'section_show',
+      sectionIds: [sectionId],
+    );
+    setState(_reload);
+  }
+
+  Future<void> _editSection(
+    int sectionId, {
+    required String currentName,
+    required String currentSummary,
+  }) async {
+    final nameController = TextEditingController(text: currentName);
+    final summaryController = TextEditingController(text: currentSummary);
+
+    Future<void> submit(BuildContext dialogContext) async {
+      final name = nameController.text.trim();
+      final summary = summaryController.text;
+      try {
+        await _repository.renameSection(
+          widget.courseId,
+          sectionId,
+          name: name,
+          summary: summary,
+        );
+        if (dialogContext.mounted) {
+          Navigator.pop(dialogContext, true);
+        }
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    }
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Edit section'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Section name',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: summaryController,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Description (optional)',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => submit(dialogContext),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      nameController.dispose();
+      summaryController.dispose();
+    });
+
+    if (saved == true && mounted) {
       setState(_reload);
     }
   }
@@ -246,55 +341,34 @@ class _CourseScreenState extends State<CourseScreen> {
     }
   }
 
-  Future<void> _createModule(int sectionId, String modname) async {
-    try {
-      await _repository.createModule(
-        widget.courseId,
-        modname: modname,
-        sectionId: sectionId,
-      );
-      setState(_reload);
-    } catch (error) {
-      if (!mounted) return;
-      final message = error.toString();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            message.contains('local_espace') || message.contains('501')
-                ? 'Module create needs FEATURE_QUICKCREATE or local_espace.'
-                : message,
-          ),
+  Future<void> _openAssignmentEditor({
+    required int sectionId,
+    int? cmid,
+  }) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => AssignmentEditorScreen(
+          courseId: widget.courseId,
+          sectionId: sectionId,
+          cmid: cmid,
         ),
-      );
+      ),
+    );
+    if (saved == true && mounted) {
+      setState(_reload);
     }
   }
 
-  void _showCreateModuleSheet(int sectionId) {
-    final mods = ['page', 'url', 'label', 'resource', 'folder', 'assign', 'forum', 'quiz'];
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return ListView(
-          shrinkWrap: true,
-          children: [
-            const ListTile(title: Text('Add activity / resource')),
-            ...mods.map(
-              (mod) => ListTile(
-                title: Text(mod),
-                onTap: () {
-                  Navigator.pop(context);
-                  _createModule(sectionId, mod);
-                },
-              ),
-            ),
-            const ListTile(
-              subtitle: Text(
-                'Full settings/content editing requires TODO(local_espace).',
-              ),
-            ),
-          ],
-        );
-      },
+  Future<void> _showAddActivityPicker(int sectionId) async {
+    final entry = await showActivityPicker(context);
+    if (entry == null || !mounted) return;
+    if (entry.modname == 'assign') {
+      await _openAssignmentEditor(sectionId: sectionId);
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${entry.label} is coming soon.')),
     );
   }
 
@@ -366,6 +440,8 @@ class _CourseScreenState extends State<CourseScreen> {
                       section['name'].toString().trim().isEmpty)
                   ? 'GENERAL'
                   : section['name'].toString();
+              final sectionSummary =
+                  section['summary']?.toString().trim() ?? '';
               final canReorder = sectionNum > 0;
               final previous = index > 0 ? sections[index - 1] : null;
               final next =
@@ -395,11 +471,14 @@ class _CourseScreenState extends State<CourseScreen> {
                       ),
                       if (_teacherMode) ...[
                         IconButton(
-                          tooltip: 'Rename section',
-                          onPressed: () =>
-                              _renameSection(sectionId, sectionName == 'GENERAL'
-                                  ? ''
-                                  : sectionName),
+                          tooltip: 'Edit section',
+                          onPressed: () => _editSection(
+                            sectionId,
+                            currentName: sectionName == 'GENERAL'
+                                ? ''
+                                : sectionName,
+                            currentSummary: sectionSummary,
+                          ),
                           icon: const Icon(Icons.edit_outlined),
                         ),
                         if (canMoveUp)
@@ -437,13 +516,17 @@ class _CourseScreenState extends State<CourseScreen> {
                             icon: const Icon(Icons.delete_outline),
                           ),
                         IconButton(
-                          tooltip: 'Add module',
-                          onPressed: () => _showCreateModuleSheet(sectionId),
+                          tooltip: 'Add activity',
+                          onPressed: () => _showAddActivityPicker(sectionId),
                           icon: const Icon(Icons.add_circle_outline),
                         ),
                       ],
                     ],
                   ),
+                  if (sectionSummary.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    HtmlContent(html: sectionSummary),
+                  ],
                   const SizedBox(height: 14),
                   ...modules.map((module) {
                     final type = module['modname']?.toString() ?? '';
@@ -477,6 +560,18 @@ class _CourseScreenState extends State<CourseScreen> {
                                           title: Text(module['name']?.toString() ?? ''),
                                           subtitle: Text(type),
                                         ),
+                                        if (type == 'assign')
+                                          ListTile(
+                                            leading: const Icon(Icons.edit_outlined),
+                                            title: const Text('Edit'),
+                                            onTap: () {
+                                              Navigator.pop(context);
+                                              _openAssignmentEditor(
+                                                sectionId: sectionId,
+                                                cmid: cmid,
+                                              );
+                                            },
+                                          ),
                                         ListTile(
                                           leading: const Icon(Icons.visibility_off),
                                           title: const Text('Hide'),
