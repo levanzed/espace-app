@@ -50,6 +50,15 @@ class _AssignViewState extends State<_AssignView> {
         widget.activity.details['submission_status'] as Map? ?? const {},
       );
 
+  /// Intro attachments live on the assign WS record, not course-module contents.
+  List<dynamic> get _introAttachmentFiles {
+    final intro = _assignment['introattachments'];
+    if (intro is List && intro.isNotEmpty) {
+      return intro;
+    }
+    return widget.activity.contents;
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -124,7 +133,7 @@ class _AssignViewState extends State<_AssignView> {
             ),
           ),
         ContentFileList(
-          contents: widget.activity.contents,
+          contents: _introAttachmentFiles,
           emptyMessage: 'No assignment files attached',
         ),
         const SizedBox(height: 12),
