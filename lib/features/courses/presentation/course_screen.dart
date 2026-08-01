@@ -119,45 +119,59 @@ class _CourseScreenState extends State<CourseScreen> {
 
   Future<void> _renameSection(int sectionId, String currentName) async {
     final controller = TextEditingController(text: currentName);
-    final name = await showDialog<String>(
+
+    Future<void> submit(BuildContext dialogContext) async {
+      final name = controller.text.trim();
+      if (name.isEmpty) return;
+      try {
+        await _repository.renameSection(
+          widget.courseId,
+          sectionId,
+          name: name,
+        );
+        if (dialogContext.mounted) {
+          Navigator.pop(dialogContext, true);
+        }
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    }
+
+    final renamed = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Rename section'),
           content: TextField(
             controller: controller,
             autofocus: true,
             decoration: const InputDecoration(labelText: 'Section name'),
-            onSubmitted: (value) => Navigator.pop(context, value.trim()),
+            onSubmitted: (_) => submit(dialogContext),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext, false),
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              onPressed: () => submit(dialogContext),
               child: const Text('Save'),
             ),
           ],
         );
       },
     );
-    controller.dispose();
-    if (name == null || name.isEmpty) return;
-    try {
-      await _repository.renameSection(
-        widget.courseId,
-        sectionId,
-        name: name,
-      );
-      if (!mounted) return;
+
+    // Dispose after the dialog route has finished tearing down its TextField.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+    });
+
+    if (renamed == true && mounted) {
       setState(_reload);
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
     }
   }
 
