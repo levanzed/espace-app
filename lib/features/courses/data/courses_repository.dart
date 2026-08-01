@@ -87,12 +87,19 @@ class CoursesRepository {
     return response.data;
   }
 
-  Future<Map<String, dynamic>> renameSectionUnsupported(
+  Future<Map<String, dynamic>> renameSection(
     int courseId,
-    int sectionId,
-  ) async {
-    final response =
-        await _api.post('/courses/$courseId/sections/$sectionId/rename');
+    int sectionId, {
+    required String name,
+    String? summary,
+  }) async {
+    final response = await _api.post(
+      '/courses/$courseId/sections/$sectionId/rename',
+      data: {
+        'name': name,
+        if (summary != null) 'summary': summary,
+      },
+    );
     return Map<String, dynamic>.from(response.data as Map);
   }
 

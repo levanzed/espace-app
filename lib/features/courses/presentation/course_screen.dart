@@ -117,6 +117,105 @@ class _CourseScreenState extends State<CourseScreen> {
     setState(_reload);
   }
 
+  Future<void> _renameSection(int sectionId, String currentName) async {
+    final controller = TextEditingController(text: currentName);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Rename section'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Section name'),
+            onSubmitted: (value) => Navigator.pop(context, value.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (name == null || name.isEmpty) return;
+    try {
+      await _repository.renameSection(
+        widget.courseId,
+        sectionId,
+        name: name,
+      );
+      if (!mounted) return;
+      setState(_reload);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
+  Future<void> _moveSection(int sectionId, int targetSectionId) async {
+    try {
+      await _repository.sectionAction(
+        widget.courseId,
+        action: 'section_move',
+        sectionIds: [sectionId],
+        targetSectionId: targetSectionId,
+      );
+      if (!mounted) return;
+      setState(_reload);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
+  Future<void> _deleteSection(int sectionId, String label) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete section'),
+          content: Text('Delete "$label"? This cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+    try {
+      await _repository.sectionAction(
+        widget.courseId,
+        action: 'section_delete',
+        sectionIds: [sectionId],
+      );
+      if (!mounted) return;
+      setState(_reload);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
   Future<void> _moduleAction(String action, int cmid) async {
     try {
       await _repository.moduleAction(
@@ -245,9 +344,23 @@ class _CourseScreenState extends State<CourseScreen> {
             itemBuilder: (context, index) {
               final section = sections[index];
               final sectionId = section['id'] as int? ?? 0;
+              final sectionNum = section['section'] as int? ?? index;
               final modules = (section['modules'] as List<dynamic>? ?? []);
               final sectionVisible = section['visible'] == 1 ||
                   section['visible'] == true;
+              final sectionName = (section['name'] == null ||
+                      section['name'].toString().trim().isEmpty)
+                  ? 'GENERAL'
+                  : section['name'].toString();
+              final canReorder = sectionNum > 0;
+              final previous = index > 0 ? sections[index - 1] : null;
+              final next =
+                  index < sections.length - 1 ? sections[index + 1] : null;
+              final previousId = previous?['id'] as int?;
+              final nextId = next?['id'] as int?;
+              final canMoveUp = canReorder && previousId != null &&
+                  (previous?['section'] as int? ?? 0) > 0;
+              final canMoveDown = canReorder && nextId != null;
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -257,10 +370,7 @@ class _CourseScreenState extends State<CourseScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          (section['name'] == null ||
-                                  section['name'].toString().trim().isEmpty)
-                              ? 'GENERAL'
-                              : section['name'].toString().toUpperCase(),
+                          sectionName.toUpperCase(),
                           style: const TextStyle(
                             fontSize: 14,
                             letterSpacing: 1.3,
@@ -270,6 +380,27 @@ class _CourseScreenState extends State<CourseScreen> {
                         ),
                       ),
                       if (_teacherMode) ...[
+                        IconButton(
+                          tooltip: 'Rename section',
+                          onPressed: () =>
+                              _renameSection(sectionId, sectionName == 'GENERAL'
+                                  ? ''
+                                  : sectionName),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                        if (canMoveUp)
+                          IconButton(
+                            tooltip: 'Move section up',
+                            onPressed: () =>
+                                _moveSection(sectionId, previousId!),
+                            icon: const Icon(Icons.arrow_upward),
+                          ),
+                        if (canMoveDown)
+                          IconButton(
+                            tooltip: 'Move section down',
+                            onPressed: () => _moveSection(sectionId, nextId!),
+                            icon: const Icon(Icons.arrow_downward),
+                          ),
                         if (sectionVisible)
                           IconButton(
                             tooltip: 'Hide section',
@@ -283,6 +414,13 @@ class _CourseScreenState extends State<CourseScreen> {
                             onPressed: () =>
                                 _sectionVisibility(sectionId, hide: false),
                             icon: const Icon(Icons.visibility_outlined),
+                          ),
+                        if (canReorder)
+                          IconButton(
+                            tooltip: 'Delete section',
+                            onPressed: () =>
+                                _deleteSection(sectionId, sectionName),
+                            icon: const Icon(Icons.delete_outline),
                           ),
                         IconButton(
                           tooltip: 'Add module',
