@@ -356,6 +356,13 @@ class _CourseScreenState extends State<CourseScreen> {
     );
     if (saved == true && mounted) {
       setState(_reload);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            cmid == null ? 'Assignment created.' : 'Assignment updated.',
+          ),
+        ),
+      );
     }
   }
 

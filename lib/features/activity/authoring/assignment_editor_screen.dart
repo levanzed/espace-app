@@ -37,6 +37,7 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
   final _introController = TextEditingController();
   final _maxGradeController = TextEditingController(text: '100');
   final _maxFilesController = TextEditingController(text: '20');
+  final _maxSizeController = TextEditingController(text: '0');
   final _scaleIdController = TextEditingController();
   final _gradeCatController = TextEditingController();
 
@@ -56,6 +57,7 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
 
   int? _introAttachmentsItemid;
   final List<String> _attachedNames = [];
+  final List<String> _existingAttachmentNames = [];
 
   @override
   void initState() {
@@ -71,9 +73,18 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
     _introController.dispose();
     _maxGradeController.dispose();
     _maxFilesController.dispose();
+    _maxSizeController.dispose();
     _scaleIdController.dispose();
     _gradeCatController.dispose();
     super.dispose();
+  }
+
+  bool _asEnabled(dynamic value, {bool fallback = true}) {
+    if (value == null) return fallback;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    final text = value.toString().trim().toLowerCase();
+    return text == '1' || text == 'true';
   }
 
   Future<void> _loadExisting() async {
@@ -95,9 +106,9 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
       _due = _fromUnix(settings['duedate']);
       _cutoff = _fromUnix(settings['cutoffdate']);
       _gradingDue = _fromUnix(settings['gradingduedate']);
-      _onlineText = (settings['onlinetext_enabled'] ?? 1) == 1;
-      _fileSubmit = (settings['file_enabled'] ?? 1) == 1;
-      _visible = (settings['visible'] ?? 1) == 1;
+      _onlineText = _asEnabled(settings['onlinetext_enabled']);
+      _fileSubmit = _asEnabled(settings['file_enabled']);
+      _visible = _asEnabled(settings['visible']);
       _gradeType = settings['grade_type']?.toString() ?? 'point';
       if (settings['grade'] != null) {
         _maxGradeController.text = settings['grade'].toString();
@@ -105,11 +116,24 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
       if (settings['maxfiles'] != null) {
         _maxFilesController.text = settings['maxfiles'].toString();
       }
+      if (settings['maxsizebytes'] != null) {
+        _maxSizeController.text = settings['maxsizebytes'].toString();
+      }
       if (settings['scaleid'] != null) {
         _scaleIdController.text = settings['scaleid'].toString();
       }
       if (settings['gradecat'] != null) {
         _gradeCatController.text = settings['gradecat'].toString();
+      }
+
+      _existingAttachmentNames.clear();
+      final existing = payload['introattachments'];
+      if (existing is List) {
+        for (final item in existing) {
+          if (item is Map && item['filename'] != null) {
+            _existingAttachmentNames.add(item['filename'].toString());
+          }
+        }
       }
     } catch (error) {
       _error = error.toString();
@@ -223,6 +247,8 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
 
     if (_fileSubmit) {
       settings['maxfiles'] = int.tryParse(_maxFilesController.text.trim()) ?? 20;
+      settings['maxsizebytes'] =
+          int.tryParse(_maxSizeController.text.trim()) ?? 0;
     }
 
     if (_gradeType == 'point') {
@@ -356,12 +382,22 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  if (_existingAttachmentNames.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Existing attachments: ${_existingAttachmentNames.join(', ')}',
+                        style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                      ),
+                    ),
                   OutlinedButton.icon(
                     onPressed: _saving ? null : _pickAttachments,
                     icon: const Icon(Icons.attach_file),
                     label: Text(
                       _attachedNames.isEmpty
-                          ? 'Add attachments (optional)'
+                          ? (widget.isEdit
+                              ? 'Replace / add attachments (optional)'
+                              : 'Add attachments (optional)')
                           : 'Add more attachments (${_attachedNames.length})',
                     ),
                   ),
@@ -369,7 +405,7 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
-                        _attachedNames.join(', '),
+                        'New uploads this session: ${_attachedNames.join(', ')}',
                         style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
                       ),
                     ),
@@ -420,6 +456,16 @@ class _AssignmentEditorScreenState extends State<AssignmentEditorScreen> {
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                         labelText: 'Maximum number of uploaded files',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _maxSizeController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Maximum submission size (bytes)',
+                        helperText: '0 = course / site default',
                         border: OutlineInputBorder(),
                       ),
                     ),
