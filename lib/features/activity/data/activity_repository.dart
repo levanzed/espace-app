@@ -75,8 +75,16 @@ class ActivityRepository {
     return response.data;
   }
 
-  Future<dynamic> submitAssign(int cmid) async {
-    final response = await _api.post('/activity/$cmid/assign/submit');
+  Future<dynamic> submitAssign(
+    int cmid, {
+    bool acceptSubmissionStatement = false,
+  }) async {
+    final response = await _api.post(
+      '/activity/$cmid/assign/submit',
+      data: {
+        'accept_submission_statement': acceptSubmissionStatement,
+      },
+    );
     return response.data;
   }
 

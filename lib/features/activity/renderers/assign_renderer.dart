@@ -1,8 +1,12 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../data/activity_repository.dart';
 import '../models/activity.dart';
 import 'activity_renderer.dart';
+import 'assign_submission_helpers.dart';
 import 'widgets/activity_layout.dart';
 import 'widgets/activity_utils.dart';
 import 'widgets/content_file_list.dart';
@@ -41,16 +45,14 @@ class _AssignViewState extends State<_AssignView> {
   final _controller = TextEditingController();
   bool _busy = false;
   String? _message;
+  bool _messageIsError = false;
 
-  Map<String, dynamic> get _assignment => Map<String, dynamic>.from(
-        widget.activity.details['assignment'] as Map? ?? const {},
-      );
+  late Map<String, dynamic> _assignment;
+  late Map<String, dynamic> _status;
 
-  Map<String, dynamic> get _status => Map<String, dynamic>.from(
-        widget.activity.details['submission_status'] as Map? ?? const {},
-      );
+  int? _pendingDraftItemId;
+  final List<String> _pendingFileNames = [];
 
-  /// Intro attachments live on the assign WS record, not course-module contents.
   List<dynamic> get _introAttachmentFiles {
     final intro = _assignment['introattachments'];
     if (intro is List && intro.isNotEmpty) {
@@ -59,43 +61,238 @@ class _AssignViewState extends State<_AssignView> {
     return widget.activity.contents;
   }
 
+  bool get _onlineTextEnabled => assignConfigEnabled(_assignment, 'onlinetext');
+  bool get _fileSubmitEnabled => assignConfigEnabled(_assignment, 'file');
+
+  @override
+  void initState() {
+    super.initState();
+    _applyActivity(widget.activity);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AssignView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activity.id != widget.activity.id) {
+      _applyActivity(widget.activity);
+    }
+  }
+
+  void _applyActivity(Activity activity) {
+    _assignment = Map<String, dynamic>.from(
+      activity.details['assignment'] as Map? ?? const {},
+    );
+    _status = Map<String, dynamic>.from(
+      activity.details['submission_status'] as Map? ?? const {},
+    );
+    final existingText = extractOnlineTextHtml(_status);
+    if (existingText != null && _controller.text.isEmpty) {
+      _controller.text = _stripHtmlForField(existingText);
+    }
+  }
+
+  String _stripHtmlForField(String html) {
+    return html
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _save({bool submit = false}) async {
+  Future<void> _refresh() async {
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      if (_controller.text.trim().isNotEmpty) {
+      final activity = await widget.repository.getActivity(widget.activity.id);
+      if (!mounted) return;
+      setState(() {
+        _applyActivity(activity);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _message = error.toString();
+          _messageIsError = true;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<void> _pickSubmissionFiles() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    setState(() {
+      _busy = true;
+      _message = null;
+      _messageIsError = false;
+    });
+
+    try {
+      final draft = await widget.repository.getDraftItemId();
+      _pendingDraftItemId ??= int.parse(draft['itemid'].toString());
+      final itemid = _pendingDraftItemId!;
+      final contextid = int.parse(draft['contextid'].toString());
+      final component = draft['component']?.toString() ?? 'user';
+      final filearea = draft['filearea']?.toString() ?? 'draft';
+
+      for (final file in result.files) {
+        final bytes = file.bytes;
+        if (bytes == null || file.name.isEmpty) continue;
+        await widget.repository.uploadDraftFile(
+          filecontentBase64: base64Encode(bytes),
+          filename: file.name,
+          contextid: contextid,
+          itemid: itemid,
+          component: component,
+          filearea: filearea,
+        );
+        _pendingFileNames.add(file.name);
+      }
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _message = error.toString();
+          _messageIsError = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<bool> _confirmSubmissionStatement() async {
+    if (!assignmentRequiresSubmissionStatement(_assignment)) {
+      return true;
+    }
+    final statement = _assignment['submissionstatement']?.toString() ??
+        'You must agree to the submission statement before submitting.';
+
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Submission statement'),
+          content: SingleChildScrollView(
+            child: HtmlContent(html: statement),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('I agree'),
+            ),
+          ],
+        );
+      },
+    );
+    return accepted == true;
+  }
+
+  Future<void> _save({required bool submit}) async {
+    if (submit) {
+      final ok = await _confirmSubmissionStatement();
+      if (!ok) return;
+    }
+
+    final text = _controller.text.trim();
+    final hasText = _onlineTextEnabled && text.isNotEmpty;
+    final hasFiles = _fileSubmitEnabled && _pendingDraftItemId != null;
+    final submittedFiles = collectSubmissionFiles(_status);
+    final submittedText = extractOnlineTextHtml(_status);
+    final hasExistingWork = submittedFiles.isNotEmpty ||
+        (submittedText != null && submittedText.trim().isNotEmpty) ||
+        submissionStatusKey(_status) == 'draft';
+
+    if (submit) {
+      if (!hasText && !hasFiles && !hasExistingWork) {
+        setState(() {
+          _message = 'Add online text or files before submitting.';
+          _messageIsError = true;
+        });
+        return;
+      }
+    } else if (!hasText && !hasFiles) {
+      setState(() {
+        _message = 'Nothing to save. Add text or upload files.';
+        _messageIsError = true;
+      });
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _message = null;
+      _messageIsError = false;
+    });
+
+    try {
+      if (hasText || hasFiles) {
         await widget.repository.saveAssignSubmission(
           widget.activity.id,
-          onlinetext: _controller.text.trim(),
+          onlinetext: hasText ? text : null,
+          draftitemid: hasFiles ? _pendingDraftItemId : null,
         );
       }
       if (submit) {
-        await widget.repository.submitAssign(widget.activity.id);
+        await widget.repository.submitAssign(
+          widget.activity.id,
+          acceptSubmissionStatement:
+              assignmentRequiresSubmissionStatement(_assignment),
+        );
       }
+      _pendingDraftItemId = null;
+      _pendingFileNames.clear();
+      await _refresh();
+      if (!mounted) return;
       setState(() {
-        _message = submit ? 'Submitted for grading.' : 'Draft saved.';
+        _message = submit
+            ? 'Submitted for grading. You can review your submission below.'
+            : 'Draft saved.';
+        _messageIsError = false;
       });
     } catch (error) {
-      setState(() => _message = error.toString());
+      if (mounted) {
+        setState(() {
+          _message = error.toString();
+          _messageIsError = true;
+        });
+      }
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final feedback = Map<String, dynamic>.from(
-      _status['feedback'] as Map? ?? const {},
-    );
-    final submissionStatus = _status['status']?.toString() ?? 'unknown';
+    final statusLabel = submissionStatusLabel(_status);
+    final statusKey = submissionStatusKey(_status);
+    final modified = submissionTimeModified(_status);
+    final submittedFiles = collectSubmissionFiles(_status);
+    final submittedText = extractOnlineTextHtml(_status);
+    final canEdit = canEditSubmission(_status);
+    final canSubmit = canSubmitForGrading(_status);
+    final blockMessage = submissionBlockingMessage(_status, _assignment);
+    final showEditor = canEdit || canSubmit;
 
     return ActivityLayout(
       activity: widget.activity,
@@ -103,7 +300,7 @@ class _AssignViewState extends State<_AssignView> {
         HtmlContent(
           html: _assignment['intro']?.toString() ?? widget.activity.description,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         _InfoCard(
           icon: Icons.schedule_rounded,
           title: 'Opens',
@@ -114,67 +311,221 @@ class _AssignViewState extends State<_AssignView> {
           title: 'Due date',
           value: formatTimestamp(_assignment['duedate'] as int?),
         ),
-        _InfoCard(
-          icon: Icons.upload_file_rounded,
-          title: 'Submission status',
-          value: submissionStatus.replaceAll('_', ' ').toUpperCase(),
-        ),
-        if (feedback.isNotEmpty)
+        _StatusCard(label: statusLabel, statusKey: statusKey),
+        if (blockMessage != null)
           Card(
+            color: Colors.amber.shade50,
             margin: const EdgeInsets.only(bottom: 12),
             child: ListTile(
-              leading: const Icon(Icons.feedback_outlined),
-              title: const Text('Feedback'),
-              subtitle: HtmlContent(
-                html: feedback['plugins'] != null
-                    ? feedback.toString()
-                    : (feedback['grade']?.toString() ?? 'Available'),
-              ),
+              leading: Icon(Icons.info_outline, color: Colors.amber.shade900),
+              title: Text(blockMessage),
             ),
           ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: _busy ? null : _refresh,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Refresh status'),
+          ),
+        ),
+        const _SectionTitle('Assignment materials'),
         ContentFileList(
           contents: _introAttachmentFiles,
           emptyMessage: 'No assignment files attached',
         ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _controller,
-          maxLines: 6,
-          decoration: const InputDecoration(
-            labelText: 'Online text submission',
-            alignLabelWithHint: true,
+        const SizedBox(height: 8),
+        const _SectionTitle('Your submission'),
+        if (modified != null && modified > 0)
+          _InfoCard(
+            icon: Icons.update_rounded,
+            title: 'Last saved',
+            value: formatTimestamp(modified),
           ),
-        ),
-        const SizedBox(height: 12),
-        if (_message != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(_message!),
-          ),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _busy ? null : () => _save(submit: false),
-                child: const Text('Save draft'),
+        if (submittedText != null && submittedText.trim().isNotEmpty) ...[
+          Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Online text',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  HtmlContent(html: submittedText),
+                ],
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton(
-                onPressed: _busy ? null : () => _save(submit: true),
-                child: _busy
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Submit'),
+          ),
+        ],
+        if (submittedFiles.isNotEmpty)
+          ContentFileList(
+            contents: submittedFiles,
+            emptyMessage: 'No files submitted',
+          )
+        else if (!_fileSubmitEnabled)
+          const SizedBox.shrink()
+        else
+          Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              leading: const Icon(Icons.attach_file_outlined),
+              title: const Text('No files submitted yet'),
+            ),
+          ),
+        if (statusKey == 'submitted' && !canEdit)
+          Card(
+            color: Colors.green.shade50,
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              leading: Icon(Icons.check_circle_outline, color: Colors.green.shade800),
+              title: const Text('Submission received'),
+              subtitle: Text(
+                modified != null
+                    ? 'Submitted ${formatTimestamp(modified)}'
+                    : 'Your work has been submitted for grading.',
               ),
             ),
+          ),
+        if (showEditor) ...[
+          const SizedBox(height: 8),
+          const _SectionTitle('Add or update your work'),
+          if (_onlineTextEnabled) ...[
+            TextField(
+              controller: _controller,
+              maxLines: 8,
+              enabled: !_busy,
+              decoration: const InputDecoration(
+                labelText: 'Online text',
+                alignLabelWithHint: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
           ],
-        ),
+          if (_fileSubmitEnabled) ...[
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _pickSubmissionFiles,
+              icon: const Icon(Icons.upload_file_rounded),
+              label: const Text('Choose files'),
+            ),
+            if (_pendingFileNames.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 12),
+                child: Text(
+                  'Files to save: ${_pendingFileNames.join(', ')}',
+                  style: TextStyle(color: Colors.grey.shade700),
+                ),
+              ),
+            if (submittedFiles.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Saving new files replaces your previous file submission.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ),
+          ],
+          if (_message != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                _message!,
+                style: TextStyle(
+                  color: _messageIsError ? Colors.red.shade700 : Colors.green.shade800,
+                ),
+              ),
+            ),
+          Row(
+            children: [
+              if (canEdit)
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _busy ? null : () => _save(submit: false),
+                    child: const Text('Save draft'),
+                  ),
+                ),
+              if (canEdit && canSubmit) const SizedBox(width: 12),
+              if (canSubmit)
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _busy ? null : () => _save(submit: true),
+                    child: _busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Submit'),
+                  ),
+                ),
+            ],
+          ),
+        ] else if (_message != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _message!,
+              style: TextStyle(
+                color: _messageIsError ? Colors.red.shade700 : Colors.green.shade800,
+              ),
+            ),
+          ),
       ],
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 12),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({
+    required this.label,
+    required this.statusKey,
+  });
+
+  final String label;
+  final String statusKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final (color, icon) = switch (statusKey) {
+      'submitted' => (Colors.green, Icons.task_alt_rounded),
+      'draft' => (Colors.orange, Icons.edit_note_rounded),
+      'reopened' => (Colors.blue, Icons.replay_rounded),
+      _ => (Colors.blueGrey, Icons.assignment_outlined),
+    };
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: Icon(icon, color: color.shade700),
+        title: const Text('Submission status'),
+        subtitle: Text(label),
+      ),
     );
   }
 }
