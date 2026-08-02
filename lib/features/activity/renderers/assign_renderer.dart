@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../grading/assign_participants_screen.dart';
 import '../data/activity_repository.dart';
 import '../models/activity.dart';
 import 'activity_renderer.dart';
@@ -312,6 +313,27 @@ class _AssignViewState extends State<_AssignView> {
           value: formatTimestamp(_assignment['duedate'] as int?),
         ),
         _StatusCard(label: statusLabel, statusKey: statusKey),
+        if (canOpenGradingInbox(_status)) ...[
+          const SizedBox(height: 4),
+          FilledButton.tonalIcon(
+            onPressed: _busy
+                ? null
+                : () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => AssignParticipantsScreen(
+                          cmid: widget.activity.id,
+                          activityName: widget.activity.name,
+                          repository: widget.repository,
+                        ),
+                      ),
+                    );
+                  },
+            icon: const Icon(Icons.fact_check_outlined),
+            label: const Text('Grade submissions'),
+          ),
+          const SizedBox(height: 12),
+        ],
         if (blockMessage != null)
           Card(
             color: Colors.amber.shade50,
@@ -390,6 +412,39 @@ class _AssignViewState extends State<_AssignView> {
               ),
             ),
           ),
+        if (hasReleasedFeedback(_status)) ...[
+          const _SectionTitle('Grade and feedback'),
+          if (gradeForDisplay(_status) != null)
+            _InfoCard(
+              icon: Icons.grade_rounded,
+              title: 'Grade',
+              value: gradeForDisplay(_status)!,
+            ),
+          if (extractFeedbackCommentHtml(_status) != null)
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Feedback',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 8),
+                    HtmlContent(html: extractFeedbackCommentHtml(_status)!),
+                  ],
+                ),
+              ),
+            ),
+          if (collectFeedbackFiles(_status).isNotEmpty)
+            ContentFileList(
+              contents: collectFeedbackFiles(_status),
+              emptyMessage: 'No feedback files',
+            ),
+          const SizedBox(height: 8),
+        ],
         if (showEditor) ...[
           const SizedBox(height: 8),
           const _SectionTitle('Add or update your work'),

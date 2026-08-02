@@ -60,6 +60,43 @@ class ActivityRepository {
     return Map<String, dynamic>.from(response.data as Map);
   }
 
+  Future<Map<String, dynamic>> getAssignParticipants(int cmid) async {
+    final response = await _api.get('/activity/$cmid/assign/participants');
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> getAssignStatusForUser(
+    int cmid,
+    int userid,
+  ) async {
+    final response = await _api.get(
+      '/activity/$cmid/assign/status',
+      queryParameters: {'userid': userid},
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<void> saveAssignGrade(
+    int cmid, {
+    required int userid,
+    required double grade,
+    String feedbackText = '',
+    int? feedbackDraftitemid,
+    int attemptnumber = -1,
+  }) async {
+    await _api.post(
+      '/activity/$cmid/assign/grades',
+      data: {
+        'userid': userid,
+        'grade': grade,
+        'attemptnumber': attemptnumber,
+        'feedback_text': feedbackText,
+        if (feedbackDraftitemid != null)
+          'feedback_draftitemid': feedbackDraftitemid,
+      },
+    );
+  }
+
   Future<dynamic> saveAssignSubmission(
     int cmid, {
     String? onlinetext,

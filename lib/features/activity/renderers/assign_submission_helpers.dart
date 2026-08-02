@@ -48,34 +48,38 @@ void _walkPlugins(dynamic plugins, void Function(Map<String, dynamic> plugin) vi
   }
 }
 
-List<Map<String, dynamic>> collectSubmissionFiles(Map<String, dynamic> status) {
+List<Map<String, dynamic>> collectFilesFromPlugins(dynamic plugins) {
   final files = <Map<String, dynamic>>[];
-
-  void addFromPlugins(dynamic plugins) {
-    _walkPlugins(plugins, (plugin) {
-      final areas = plugin['fileareas'];
-      if (areas is! List) return;
-      for (final area in areas) {
-        if (area is! Map) continue;
-        final areaFiles = area['files'];
-        if (areaFiles is! List) continue;
-        for (final file in areaFiles) {
-          if (file is Map) {
-            files.add(Map<String, dynamic>.from(file));
-          }
+  _walkPlugins(plugins, (plugin) {
+    final areas = plugin['fileareas'];
+    if (areas is! List) return;
+    for (final area in areas) {
+      if (area is! Map) continue;
+      final areaFiles = area['files'];
+      if (areaFiles is! List) continue;
+      for (final file in areaFiles) {
+        if (file is Map) {
+          files.add(Map<String, dynamic>.from(file));
         }
       }
-    });
-  }
+    }
+  });
+  return files;
+}
 
+List<Map<String, dynamic>> collectSubmissionFiles(Map<String, dynamic> status) {
+  final files = <Map<String, dynamic>>[];
   final last = _lastAttempt(status);
-  if (last != null) {
-    addFromPlugins(last['submission'] is Map
-        ? (last['submission'] as Map)['plugins']
-        : null);
-    addFromPlugins(last['teamsubmission'] is Map
-        ? (last['teamsubmission'] as Map)['plugins']
-        : null);
+  if (last == null) return files;
+  if (last['submission'] is Map) {
+    files.addAll(
+      collectFilesFromPlugins((last['submission'] as Map)['plugins']),
+    );
+  }
+  if (last['teamsubmission'] is Map) {
+    files.addAll(
+      collectFilesFromPlugins((last['teamsubmission'] as Map)['plugins']),
+    );
   }
   return files;
 }
@@ -198,4 +202,59 @@ String? submissionBlockingMessage(
     return 'You cannot edit or submit at this time.';
   }
   return null;
+}
+
+bool canOpenGradingInbox(Map<String, dynamic> status) {
+  return status['gradingsummary'] != null;
+}
+
+String? gradeForDisplay(Map<String, dynamic> status) {
+  final feedback = status['feedback'];
+  if (feedback is! Map) return null;
+  final display = feedback['gradefordisplay']?.toString();
+  if (display != null && display.trim().isNotEmpty) {
+    return display;
+  }
+  return null;
+}
+
+String? extractFeedbackCommentHtml(Map<String, dynamic> status) {
+  final feedback = status['feedback'];
+  if (feedback is! Map) return null;
+
+  String? fromPlugins(dynamic plugins) {
+    String? found;
+    _walkPlugins(plugins, (plugin) {
+      if (found != null) return;
+      final name = plugin['name']?.toString() ?? '';
+      final type = plugin['type']?.toString() ?? '';
+      if (name != 'comments' && type != 'comments') return;
+      final fields = plugin['editorfields'];
+      if (fields is! List) return;
+      for (final field in fields) {
+        if (field is! Map) continue;
+        final fieldMap = Map<String, dynamic>.from(field);
+        final text = fieldMap['text']?.toString();
+        if (text != null && text.trim().isNotEmpty) {
+          found = text;
+        }
+      }
+    });
+    return found;
+  }
+
+  return fromPlugins(feedback['plugins']);
+}
+
+List<Map<String, dynamic>> collectFeedbackFiles(Map<String, dynamic> status) {
+  final feedback = status['feedback'];
+  if (feedback is! Map) return [];
+  return collectFilesFromPlugins(feedback['plugins']);
+}
+
+bool hasReleasedFeedback(Map<String, dynamic> status) {
+  if (gradeForDisplay(status) != null) return true;
+  final comment = extractFeedbackCommentHtml(status);
+  if (comment != null && comment.trim().isNotEmpty) return true;
+  return collectFeedbackFiles(status).isNotEmpty;
 }
