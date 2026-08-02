@@ -249,7 +249,17 @@ String? extractFeedbackCommentHtml(Map<String, dynamic> status) {
 List<Map<String, dynamic>> collectFeedbackFiles(Map<String, dynamic> status) {
   final feedback = status['feedback'];
   if (feedback is! Map) return [];
-  return collectFilesFromPlugins(feedback['plugins']);
+
+  // Only assignfeedback_file uploads (ESPACE "Attach feedback files").
+  // Exclude editpdf (combined.pdf, stamp PNGs) and other Moodle grader plugins.
+  final files = <Map<String, dynamic>>[];
+  _walkPlugins(feedback['plugins'], (plugin) {
+    final name = plugin['name']?.toString() ?? '';
+    final type = plugin['type']?.toString() ?? '';
+    if (name != 'file' && type != 'file') return;
+    files.addAll(collectFilesFromPlugins([plugin]));
+  });
+  return files;
 }
 
 bool hasReleasedFeedback(Map<String, dynamic> status) {

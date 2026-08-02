@@ -415,10 +415,13 @@ class _AssignViewState extends State<_AssignView> {
         if (hasReleasedFeedback(_status)) ...[
           const _SectionTitle('Grade and feedback'),
           if (gradeForDisplay(_status) != null)
-            _InfoCard(
-              icon: Icons.grade_rounded,
-              title: 'Grade',
-              value: gradeForDisplay(_status)!,
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                leading: const Icon(Icons.grade_rounded),
+                title: const Text('Grade'),
+                subtitle: HtmlContent(html: gradeForDisplay(_status)!),
+              ),
             ),
           if (extractFeedbackCommentHtml(_status) != null)
             Card(
