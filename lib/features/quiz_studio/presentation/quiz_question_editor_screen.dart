@@ -85,6 +85,37 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     });
   }
 
+  void _wrapStem(String left, String right) {
+    final text = _stem.text;
+    final selection = _stem.selection;
+    if (!selection.isValid) {
+      _stem.text = '$left$text$right';
+      _stem.selection = TextSelection.collapsed(offset: _stem.text.length);
+      return;
+    }
+    final start = selection.start;
+    final end = selection.end;
+    final selected = text.substring(start, end);
+    final next = text.replaceRange(start, end, '$left$selected$right');
+    _stem.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(
+        offset: start + left.length + selected.length + right.length,
+      ),
+    );
+  }
+
+  void _insertStem(String snippet) {
+    final text = _stem.text;
+    final selection = _stem.selection;
+    final offset = selection.isValid ? selection.start : text.length;
+    final next = text.replaceRange(offset, offset, snippet);
+    _stem.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: offset + snippet.length),
+    );
+  }
+
   void _save() {
     final stem = _stem.text.trim();
     if (stem.isEmpty) {
@@ -186,28 +217,68 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
           ],
           _SectionLabel(label: 'Question'),
           const SizedBox(height: 10),
-          TextField(
-            controller: _stem,
-            autofocus: isNew,
-            maxLines: 4,
-            minLines: 3,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500, height: 1.4),
-            decoration: InputDecoration(
-              hintText: 'Write the question…',
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(color: Colors.grey.shade200),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(color: _accent, width: 1.5),
-              ),
+          Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            child: Column(
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Bold',
+                        onPressed: () => _wrapStem('<b>', '</b>'),
+                        icon: const Icon(Icons.format_bold),
+                      ),
+                      IconButton(
+                        tooltip: 'Italic',
+                        onPressed: () => _wrapStem('<i>', '</i>'),
+                        icon: const Icon(Icons.format_italic),
+                      ),
+                      IconButton(
+                        tooltip: 'Bullet list',
+                        onPressed: () => _insertStem('<ul><li></li></ul>'),
+                        icon: const Icon(Icons.format_list_bulleted),
+                      ),
+                      IconButton(
+                        tooltip: 'Link',
+                        onPressed: () => _wrapStem('<a href="">', '</a>'),
+                        icon: const Icon(Icons.link),
+                      ),
+                      IconButton(
+                        tooltip: 'Image URL',
+                        onPressed: () =>
+                            _insertStem('<img src="" alt="" />'),
+                        icon: const Icon(Icons.image_outlined),
+                      ),
+                      IconButton(
+                        tooltip: 'LaTeX',
+                        onPressed: () => _wrapStem(r'\(', r'\)'),
+                        icon: const Icon(Icons.functions),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                TextField(
+                  controller: _stem,
+                  autofocus: isNew,
+                  maxLines: 5,
+                  minLines: 3,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w500,
+                    height: 1.4,
+                  ),
+                  decoration: const InputDecoration(
+                    hintText: 'Write the question…',
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
@@ -232,25 +303,59 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
             hint: _isMcq ? 'Tap the circle to mark the correct one' : null,
           ),
           const SizedBox(height: 12),
-          ...List.generate(_options.length, (index) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Material(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
-                  child: Row(
-                    children: [
-                      if (_isMcq)
-                        Radio<int>(
-                          value: index,
-                          groupValue: _correctIndex,
-                          activeColor: _accent,
-                          onChanged: (v) =>
-                              setState(() => _correctIndex = v ?? 0),
-                        )
-                      else
+          if (_isMcq)
+            RadioGroup<int>(
+              groupValue: _correctIndex,
+              onChanged: (v) => setState(() => _correctIndex = v ?? 0),
+              child: Column(
+                children: [
+                  for (var index = 0; index < _options.length; index++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Material(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+                          child: Row(
+                            children: [
+                              Radio<int>(value: index),
+                              Expanded(
+                                child: TextField(
+                                  controller: _options[index],
+                                  decoration: InputDecoration(
+                                    hintText: 'Choice ${index + 1}',
+                                    border: InputBorder.none,
+                                  ),
+                                ),
+                              ),
+                              if (_options.length > 2)
+                                IconButton(
+                                  onPressed: () => _removeOption(index),
+                                  icon: Icon(
+                                    Icons.remove_circle_outline,
+                                    color: Colors.grey.shade400,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            )
+          else
+            for (var index = 0; index < _options.length; index++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+                    child: Row(
+                      children: [
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           child: Icon(
@@ -259,31 +364,28 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
                             color: Colors.grey.shade400,
                           ),
                         ),
-                      Expanded(
-                        child: TextField(
-                          controller: _options[index],
-                          decoration: InputDecoration(
-                            hintText: _isMcq
-                                ? 'Choice ${index + 1}'
-                                : 'Answer ${index + 1}',
-                            border: InputBorder.none,
+                        Expanded(
+                          child: TextField(
+                            controller: _options[index],
+                            decoration: InputDecoration(
+                              hintText: 'Answer ${index + 1}',
+                              border: InputBorder.none,
+                            ),
                           ),
                         ),
-                      ),
-                      if (_options.length > (_isMcq ? 2 : 1))
-                        IconButton(
-                          onPressed: () => _removeOption(index),
-                          icon: Icon(
-                            Icons.remove_circle_outline,
-                            color: Colors.grey.shade400,
+                        if (_options.length > 1)
+                          IconButton(
+                            onPressed: () => _removeOption(index),
+                            icon: Icon(
+                              Icons.remove_circle_outline,
+                              color: Colors.grey.shade400,
+                            ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            );
-          }),
           const SizedBox(height: 4),
           TextButton.icon(
             onPressed: _addOption,

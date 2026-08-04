@@ -6,6 +6,7 @@ import 'activity_renderer.dart';
 import 'widgets/activity_layout.dart';
 import 'widgets/activity_utils.dart';
 import 'widgets/html_content.dart';
+import 'widgets/quiz_attempt_question.dart';
 
 class QuizRenderer extends ActivityRenderer {
   const QuizRenderer();
@@ -41,6 +42,9 @@ class _QuizViewState extends State<_QuizView> {
   String? _message;
   Map<String, dynamic>? _attemptData;
   Map<String, dynamic>? _review;
+  List<ParsedQuizQuestion> _parsedQuestions = const [];
+  /// slot → Moodle answer field value (radio value or typed text).
+  final Map<int, String> _answers = {};
 
   Map<String, dynamic> get _quiz => Map<String, dynamic>.from(
         widget.activity.details['quiz'] as Map? ?? const {},
@@ -57,10 +61,13 @@ class _QuizViewState extends State<_QuizView> {
     setState(() {
       _busy = true;
       _message = null;
+      _review = null;
     });
     try {
-      final started = await widget.repository.startQuizAttempt(widget.activity.id);
-      final attempt = Map<String, dynamic>.from(started['attempt'] as Map? ?? started);
+      final started =
+          await widget.repository.startQuizAttempt(widget.activity.id);
+      final attempt =
+          Map<String, dynamic>.from(started['attempt'] as Map? ?? started);
       final attemptId = attempt['id'] as int?;
       if (attemptId == null) {
         throw Exception('Quiz attempt id missing');
@@ -69,8 +76,16 @@ class _QuizViewState extends State<_QuizView> {
         widget.activity.id,
         attemptId,
       );
+      final questions = List<dynamic>.from(data['questions'] ?? const []);
+      final parsed = questions
+          .map((q) => ParsedQuizQuestion.fromMoodle(
+                Map<String, dynamic>.from(q as Map),
+              ))
+          .toList();
       setState(() {
         _attemptData = data;
+        _parsedQuestions = parsed;
+        _answers.clear();
         _message = 'Attempt $attemptId started.';
       });
     } catch (error) {
@@ -78,6 +93,17 @@ class _QuizViewState extends State<_QuizView> {
     } finally {
       setState(() => _busy = false);
     }
+  }
+
+  List<Map<String, dynamic>> _buildProcessData() {
+    final rows = <Map<String, dynamic>>[];
+    for (final question in _parsedQuestions) {
+      final answer = _answers[question.slot];
+      for (final row in question.toProcessRows(answer)) {
+        rows.add(row);
+      }
+    }
+    return rows;
   }
 
   Future<void> _finish() async {
@@ -94,6 +120,7 @@ class _QuizViewState extends State<_QuizView> {
       await widget.repository.processQuizAttempt(
         widget.activity.id,
         attemptId,
+        data: _buildProcessData(),
         finishattempt: 1,
       );
       final review = await widget.repository.reviewQuizAttempt(
@@ -102,6 +129,9 @@ class _QuizViewState extends State<_QuizView> {
       );
       setState(() {
         _review = review;
+        _parsedQuestions = const [];
+        _answers.clear();
+        _attemptData = null;
         _message = 'Attempt submitted.';
       });
     } catch (error) {
@@ -113,12 +143,12 @@ class _QuizViewState extends State<_QuizView> {
 
   @override
   Widget build(BuildContext context) {
-    final questions = List<dynamic>.from(_attemptData?['questions'] ?? const []);
-
     return ActivityLayout(
       activity: widget.activity,
       children: [
-        HtmlContent(html: _quiz['intro']?.toString() ?? widget.activity.description),
+        HtmlContent(
+          html: _quiz['intro']?.toString() ?? widget.activity.description,
+        ),
         const SizedBox(height: 20),
         _InfoCard(
           icon: Icons.schedule_rounded,
@@ -168,19 +198,26 @@ class _QuizViewState extends State<_QuizView> {
           icon: const Icon(Icons.play_arrow_rounded),
           label: const Text('Start / resume attempt'),
         ),
-        if (questions.isNotEmpty) ...[
+        if (_parsedQuestions.isNotEmpty) ...[
           const SizedBox(height: 16),
-          Text('Current attempt questions',
-              style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            'Current attempt questions',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const SizedBox(height: 8),
-          ...questions.map((question) {
-            final map = Map<String, dynamic>.from(question as Map);
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: HtmlContent(html: map['html']?.toString() ?? ''),
-              ),
+          ..._parsedQuestions.map((question) {
+            return QuizAttemptQuestionCard(
+              key: ValueKey('quiz-q-${question.slot}'),
+              question: question,
+              onAnswerChanged: (value) {
+                setState(() {
+                  if (value == null || value.isEmpty) {
+                    _answers.remove(question.slot);
+                  } else {
+                    _answers[question.slot] = value;
+                  }
+                });
+              },
             );
           }),
           FilledButton(

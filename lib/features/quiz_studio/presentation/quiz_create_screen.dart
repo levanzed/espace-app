@@ -1,25 +1,35 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../courses/data/courses_repository.dart';
+import '../data/local_question_bank.dart';
+import '../data/quiz_draft_store.dart';
 import '../data/quiz_studio_repository.dart';
 import '../models/quiz_draft.dart';
+import 'quiz_draft_manager_sheet.dart';
+import 'quiz_preview_screen.dart';
 import 'quiz_question_card.dart';
 import 'quiz_question_editor_screen.dart';
+import 'quiz_settings_sheet.dart';
 
-/// Quiz Studio V1 — teacher canvas for authoring and publishing a quiz.
+/// Quiz Studio — teacher canvas for authoring and publishing a quiz.
 ///
-/// Layout grows toward AI Studio: details header → question cards → add actions
-/// → sticky Publish. No dialogs; question edit is a dedicated screen.
+/// Phase 1B: local drafts, reorder/dup/undo. Publish remains create-only.
 class QuizCreateScreen extends StatefulWidget {
   const QuizCreateScreen({
     super.key,
     required this.courseId,
     this.initialSectionId,
+    this.initialDraft,
   });
 
   final int courseId;
   final int? initialSectionId;
+  final QuizDraft? initialDraft;
 
   @override
   State<QuizCreateScreen> createState() => _QuizCreateScreenState();
@@ -37,10 +47,16 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
 
   final _courses = CoursesRepository();
   final _quizStudio = QuizStudioRepository();
+  final _draftStore = QuizDraftStore();
+  final _questionBank = LocalQuestionBank();
   final _titleController = TextEditingController();
   final _introController = TextEditingController();
   final _scrollController = ScrollController();
-  final _draft = QuizDraft();
+  final _searchController = TextEditingController();
+  late QuizDraft _draft;
+  Timer? _autosaveTimer;
+  bool _dirty = false;
+  String _questionFilter = '';
 
   List<_SectionOption> _sections = [];
   int? _sectionId;
@@ -48,20 +64,278 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
   bool _publishing = false;
   bool _showInstructions = false;
   String? _error;
+  String? _autosaveLabel;
 
   @override
   void initState() {
     super.initState();
-    _sectionId = widget.initialSectionId;
+    _draft = widget.initialDraft ??
+        QuizDraft(
+          courseId: widget.courseId,
+          sectionId: widget.initialSectionId,
+        );
+    _draft.courseId ??= widget.courseId;
+    _titleController.text = _draft.title;
+    _introController.text = _draft.introText;
+    _sectionId = _draft.sectionId ?? widget.initialSectionId;
+    _titleController.addListener(_onDraftFieldChanged);
+    _introController.addListener(_onDraftFieldChanged);
     _loadSections();
   }
 
   @override
   void dispose() {
+    _autosaveTimer?.cancel();
+    _titleController.removeListener(_onDraftFieldChanged);
+    _introController.removeListener(_onDraftFieldChanged);
     _titleController.dispose();
     _introController.dispose();
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _onDraftFieldChanged() {
+    _dirty = true;
+    _scheduleAutosave();
+  }
+
+  void _markDirty() {
+    _dirty = true;
+    _draft.touch();
+    _scheduleAutosave();
+  }
+
+  void _scheduleAutosave() {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(const Duration(milliseconds: 800), _autosave);
+  }
+
+  Future<void> _autosave() async {
+    if (!_dirty) return;
+    _syncControllersIntoDraft();
+    try {
+      await _draftStore.save(_draft);
+      if (!mounted) return;
+      setState(() {
+        _dirty = false;
+        _autosaveLabel = 'Draft saved';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _autosaveLabel = 'Autosave failed');
+    }
+  }
+
+  void _syncControllersIntoDraft() {
+    _draft.title = _titleController.text;
+    _draft.introText = _introController.text;
+    _draft.sectionId = _sectionId;
+    _draft.courseId = widget.courseId;
+  }
+
+  Future<void> _saveNow() async {
+    _syncControllersIntoDraft();
+    await _draftStore.save(_draft);
+    if (!mounted) return;
+    setState(() {
+      _dirty = false;
+      _autosaveLabel = 'Draft saved';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Draft saved on this device')),
+    );
+  }
+
+  Future<void> _newDraft() async {
+    final discard = await _confirmLeaveIfDirty();
+    if (!discard || !mounted) return;
+    setState(() {
+      _draft = QuizDraft(
+        courseId: widget.courseId,
+        sectionId: _sectionId,
+      );
+      _titleController.text = '';
+      _introController.text = '';
+      _dirty = false;
+      _autosaveLabel = null;
+      _error = null;
+    });
+  }
+
+  Future<void> _openDraftManager() async {
+    final selected = await QuizDraftManagerSheet.show(
+      context,
+      courseId: widget.courseId,
+      store: _draftStore,
+      currentDraftId: _draft.id,
+    );
+    if (selected == null || !mounted) return;
+    if (selected.id == _draft.id) return;
+    final ok = await _confirmLeaveIfDirty();
+    if (!ok || !mounted) return;
+    setState(() {
+      _draft = selected;
+      _titleController.text = _draft.title;
+      _introController.text = _draft.introText;
+      if (_draft.sectionId != null) _sectionId = _draft.sectionId;
+      _dirty = false;
+      _autosaveLabel = 'Draft opened';
+      _error = null;
+    });
+  }
+
+  Future<bool> _confirmLeaveIfDirty() async {
+    if (!_dirty) return true;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Unsaved changes'),
+        content: const Text('Save the current draft before continuing?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            child: const Text('Discard'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'save'),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == 'cancel' || result == null) return false;
+    if (result == 'save') {
+      await _saveNow();
+    }
+    return true;
+  }
+
+  void _openPreview() {
+    _syncControllersIntoDraft();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => QuizPreviewScreen(draft: _draft),
+      ),
+    );
+  }
+
+  Future<void> _exportJson() async {
+    _syncControllersIntoDraft();
+    final json = const JsonEncoder.withIndent('  ').convert(_draft.toDraftJson());
+    await Clipboard.setData(ClipboardData(text: json));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Quiz JSON copied to clipboard')),
+    );
+  }
+
+  Future<void> _importJson() async {
+    final controller = TextEditingController();
+    final raw = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import quiz JSON'),
+        content: TextField(
+          controller: controller,
+          maxLines: 12,
+          decoration: const InputDecoration(
+            hintText: 'Paste Quiz Studio JSON…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    if (raw == null || raw.trim().isEmpty || !mounted) return;
+    try {
+      final map = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final imported = QuizDraft.fromDraftJson(map);
+      imported.courseId = widget.courseId;
+      imported.sectionId = _sectionId;
+      setState(() {
+        _draft = imported;
+        _titleController.text = _draft.title;
+        _introController.text = _draft.introText;
+        _error = null;
+      });
+      _markDirty();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Quiz imported')),
+      );
+    } catch (_) {
+      _showError('Could not import JSON. Check the format and try again.');
+    }
+  }
+
+  Future<void> _saveQuestionToBank(int index) async {
+    await _questionBank.saveQuestion(_draft.questions[index]);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Saved to local question bank')),
+    );
+  }
+
+  Future<void> _reuseFromBank() async {
+    final items = await _questionBank.list();
+    if (!mounted) return;
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Local question bank is empty')),
+      );
+      return;
+    }
+    final selected = await showModalBottomSheet<QuizQuestionDraft>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => ListView.builder(
+        itemCount: items.length,
+        itemBuilder: (context, i) {
+          final q = items[i];
+          final stem = q.stem.replaceAll(RegExp(r'<[^>]+>'), ' ').trim();
+          return ListTile(
+            title: Text(stem.isEmpty ? 'Untitled' : stem, maxLines: 2),
+            subtitle: Text(
+              q.type == QuizQuestionType.multipleChoice
+                  ? 'Multiple choice'
+                  : 'Short answer',
+            ),
+            onTap: () => Navigator.pop(ctx, q),
+          );
+        },
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _draft.questions.add(selected.duplicate());
+    });
+    _markDirty();
+  }
+
+  List<int> get _visibleQuestionIndexes {
+    final q = _questionFilter.trim().toLowerCase();
+    if (q.isEmpty) {
+      return List.generate(_draft.questions.length, (i) => i);
+    }
+    final indexes = <int>[];
+    for (var i = 0; i < _draft.questions.length; i++) {
+      final stem = _draft.questions[i].stem.toLowerCase();
+      if (stem.contains(q)) indexes.add(i);
+    }
+    return indexes;
   }
 
   int? _asInt(dynamic value) {
@@ -170,29 +444,48 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
       }
       _error = null;
     });
+    _markDirty();
   }
 
-  Future<void> _confirmDelete(int index) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove question?'),
-        content: const Text('This question will be removed from the draft.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
+  void _duplicateQuestion(int index) {
+    final copy = _draft.questions[index].duplicate();
+    setState(() {
+      _draft.questions.insert(index + 1, copy);
+    });
+    _markDirty();
+  }
+
+  void _deleteQuestion(int index) {
+    final removed = _draft.questions[index];
+    setState(() {
+      _draft.questions.removeAt(index);
+    });
+    _markDirty();
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Question removed'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            setState(() {
+              final insertAt = index.clamp(0, _draft.questions.length);
+              _draft.questions.insert(insertAt, removed);
+            });
+            _markDirty();
+          },
+        ),
       ),
     );
-    if (confirmed == true && mounted) {
-      setState(() => _draft.questions.removeAt(index));
-    }
+  }
+
+  void _reorderQuestions(int oldIndex, int newIndex) {
+    setState(() {
+      final item = _draft.questions.removeAt(oldIndex);
+      _draft.questions.insert(newIndex, item);
+    });
+    _markDirty();
   }
 
   Future<void> _publish() async {
@@ -222,6 +515,8 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
         sectionId: _sectionId!,
         body: _draft.toPublishRequest(),
       );
+      // Published quizzes live in Moodle; drop the local draft copy.
+      await _draftStore.delete(_draft.id);
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (error) {
@@ -236,6 +531,8 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
   @override
   Widget build(BuildContext context) {
     final count = _draft.questions.length;
+    final visible = _visibleQuestionIndexes;
+    final filtering = _questionFilter.trim().isNotEmpty;
 
     return PopScope(
       canPop: !_publishing,
@@ -247,9 +544,10 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
             children: [
               const Text('Quiz Studio'),
               Text(
-                count == 0
-                    ? 'New quiz'
-                    : '$count question${count == 1 ? '' : 's'}',
+                _autosaveLabel ??
+                    (count == 0
+                        ? 'New quiz'
+                        : '$count question${count == 1 ? '' : 's'}'),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
@@ -258,73 +556,215 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
               ),
             ],
           ),
+          actions: [
+            IconButton(
+              tooltip: 'Preview',
+              onPressed: _draft.questions.isEmpty ? null : _openPreview,
+              icon: const Icon(Icons.visibility_outlined),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (value) async {
+                switch (value) {
+                  case 'new':
+                    await _newDraft();
+                  case 'open':
+                    await _openDraftManager();
+                  case 'save':
+                    await _saveNow();
+                  case 'discard':
+                    final messenger = ScaffoldMessenger.of(context);
+                    await _draftStore.delete(_draft.id);
+                    if (!mounted) return;
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Draft discarded from device'),
+                      ),
+                    );
+                    await _newDraft();
+                  case 'export':
+                    await _exportJson();
+                  case 'import':
+                    await _importJson();
+                  case 'bank':
+                    await _reuseFromBank();
+                  case 'settings':
+                    final next = await QuizSettingsSheet.show(
+                      context,
+                      _draft.settings,
+                    );
+                    if (next != null && mounted) {
+                      setState(() => _draft.settings = next);
+                      _markDirty();
+                    }
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'new', child: Text('New draft')),
+                PopupMenuItem(value: 'open', child: Text('Open draft…')),
+                PopupMenuItem(value: 'save', child: Text('Save draft')),
+                PopupMenuItem(value: 'discard', child: Text('Discard draft')),
+                PopupMenuDivider(),
+                PopupMenuItem(value: 'settings', child: Text('Quiz settings…')),
+                PopupMenuItem(value: 'export', child: Text('Export JSON')),
+                PopupMenuItem(value: 'import', child: Text('Import JSON…')),
+                PopupMenuItem(
+                  value: 'bank',
+                  child: Text('Reuse from local bank…'),
+                ),
+              ],
+            ),
+          ],
         ),
         body: _loadingSections
             ? const Center(child: CircularProgressIndicator())
             : Column(
                 children: [
                   Expanded(
-                    child: ListView(
+                    child: CustomScrollView(
                       controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
-                      children: [
-                        if (_error != null) ...[
-                          _ErrorBanner(message: _error!),
-                          const SizedBox(height: 16),
-                        ],
-                        _DetailsCard(
-                          titleController: _titleController,
-                          introController: _introController,
-                          showInstructions: _showInstructions,
-                          onToggleInstructions: () {
-                            setState(
-                              () => _showInstructions = !_showInstructions,
-                            );
-                          },
-                          sectionId: _sectionId,
-                          sections: _sections,
-                          onSectionChanged: (id) =>
-                              setState(() => _sectionId = id),
-                        ),
-                        const SizedBox(height: 28),
-                        _QuestionsHeader(count: count),
-                        const SizedBox(height: 14),
-                        if (count == 0)
-                          _EmptyQuestions(
-                            onAddMcq: () => _openEditor(
-                              type: QuizQuestionType.multipleChoice,
-                            ),
-                            onAddShortAnswer: () => _openEditor(
-                              type: QuizQuestionType.shortAnswer,
-                            ),
-                          )
-                        else ...[
-                          ...List.generate(count, (index) {
-                            final q = _draft.questions[index];
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: QuizQuestionCard(
-                                index: index,
-                                question: q,
-                                onTap: () => _openEditor(
-                                  type: q.type,
-                                  existing: q,
-                                  replaceIndex: index,
-                                ),
-                                onDelete: () => _confirmDelete(index),
+                      slivers: [
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
+                          sliver: SliverList(
+                            delegate: SliverChildListDelegate([
+                              if (_error != null) ...[
+                                _ErrorBanner(message: _error!),
+                                const SizedBox(height: 16),
+                              ],
+                              _DetailsCard(
+                                titleController: _titleController,
+                                introController: _introController,
+                                showInstructions: _showInstructions,
+                                onToggleInstructions: () {
+                                  setState(
+                                    () =>
+                                        _showInstructions = !_showInstructions,
+                                  );
+                                },
+                                sectionId: _sectionId,
+                                sections: _sections,
+                                onSectionChanged: (id) =>
+                                    setState(() => _sectionId = id),
                               ),
-                            );
-                          }),
-                          const SizedBox(height: 8),
-                          _AddQuestionRow(
-                            onAddMcq: () => _openEditor(
-                              type: QuizQuestionType.multipleChoice,
-                            ),
-                            onAddShortAnswer: () => _openEditor(
-                              type: QuizQuestionType.shortAnswer,
+                              const SizedBox(height: 28),
+                              _QuestionsHeader(count: count),
+                              if (count > 0) ...[
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _searchController,
+                                  onChanged: (value) => setState(
+                                    () => _questionFilter = value,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: 'Search questions…',
+                                    prefixIcon: const Icon(Icons.search, size: 20),
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    isDense: true,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 14),
+                              if (count == 0)
+                                _EmptyQuestions(
+                                  onAddMcq: () => _openEditor(
+                                    type: QuizQuestionType.multipleChoice,
+                                  ),
+                                  onAddShortAnswer: () => _openEditor(
+                                    type: QuizQuestionType.shortAnswer,
+                                  ),
+                                ),
+                            ]),
+                          ),
+                        ),
+                        if (count > 0 && !filtering)
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+                            sliver: SliverReorderableList(
+                              itemCount: count,
+                              onReorderItem: _reorderQuestions,
+                              itemBuilder: (context, index) {
+                                final q = _draft.questions[index];
+                                return Padding(
+                                  key: ValueKey(q.id),
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: QuizQuestionCard(
+                                    index: index,
+                                    question: q,
+                                    dragIndex: index,
+                                    onTap: () => _openEditor(
+                                      type: q.type,
+                                      existing: q,
+                                      replaceIndex: index,
+                                    ),
+                                    onDuplicate: () =>
+                                        _duplicateQuestion(index),
+                                    onDelete: () => _deleteQuestion(index),
+                                    onSaveToBank: () =>
+                                        _saveQuestionToBank(index),
+                                  ),
+                                );
+                              },
                             ),
                           ),
-                        ],
+                        if (count > 0 && filtering)
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, i) {
+                                  final index = visible[i];
+                                  final q = _draft.questions[index];
+                                  return Padding(
+                                    key: ValueKey('filter-${q.id}'),
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: QuizQuestionCard(
+                                      index: index,
+                                      question: q,
+                                      onTap: () => _openEditor(
+                                        type: q.type,
+                                        existing: q,
+                                        replaceIndex: index,
+                                      ),
+                                      onDuplicate: () =>
+                                          _duplicateQuestion(index),
+                                      onDelete: () => _deleteQuestion(index),
+                                      onSaveToBank: () =>
+                                          _saveQuestionToBank(index),
+                                    ),
+                                  );
+                                },
+                                childCount: visible.length,
+                              ),
+                            ),
+                          ),
+                        if (count > 0)
+                          const SliverToBoxAdapter(
+                            child: SizedBox(height: 8),
+                          ),
+                        if (count > 0)
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+                            sliver: SliverToBoxAdapter(
+                              child: _AddQuestionRow(
+                                onAddMcq: () => _openEditor(
+                                  type: QuizQuestionType.multipleChoice,
+                                ),
+                                onAddShortAnswer: () => _openEditor(
+                                  type: QuizQuestionType.shortAnswer,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          const SliverToBoxAdapter(
+                            child: SizedBox(height: 24),
+                          ),
                       ],
                     ),
                   ),

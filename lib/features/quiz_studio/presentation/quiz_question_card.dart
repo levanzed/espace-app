@@ -10,12 +10,20 @@ class QuizQuestionCard extends StatelessWidget {
     required this.question,
     required this.onTap,
     required this.onDelete,
+    this.onDuplicate,
+    this.onSaveToBank,
+    this.dragIndex,
   });
 
   final int index;
   final QuizQuestionDraft question;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final VoidCallback? onDuplicate;
+  final VoidCallback? onSaveToBank;
+
+  /// When set, shows a [ReorderableDragStartListener] handle.
+  final int? dragIndex;
 
   static const Color _accent = Color(0xFF5B4B8A);
 
@@ -23,7 +31,9 @@ class QuizQuestionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isMcq = question.type == QuizQuestionType.multipleChoice;
     final stem = question.stem.trim();
-    final stemPreview = stem.isEmpty ? 'Untitled question' : stem;
+    final stemPreview = stem.isEmpty
+        ? 'Untitled question'
+        : stem.replaceAll(RegExp(r'<[^>]+>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
 
     return Material(
       color: Colors.white,
@@ -34,13 +44,26 @@ class QuizQuestionCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
+          padding: const EdgeInsets.fromLTRB(8, 16, 4, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (dragIndex != null)
+                    ReorderableDragStartListener(
+                      index: dragIndex!,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 4, right: 4),
+                        child: Icon(
+                          Icons.drag_handle_rounded,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 8),
                   _IndexBadge(index: index + 1),
                   const SizedBox(width: 12),
                   Expanded(
@@ -83,6 +106,26 @@ class QuizQuestionCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  if (onSaveToBank != null)
+                    IconButton(
+                      tooltip: 'Save to local bank',
+                      onPressed: onSaveToBank,
+                      icon: Icon(
+                        Icons.bookmark_add_outlined,
+                        size: 20,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  if (onDuplicate != null)
+                    IconButton(
+                      tooltip: 'Duplicate',
+                      onPressed: onDuplicate,
+                      icon: Icon(
+                        Icons.copy_rounded,
+                        size: 20,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
                   IconButton(
                     tooltip: 'Remove',
                     onPressed: onDelete,
@@ -100,7 +143,7 @@ class QuizQuestionCard extends StatelessWidget {
                     .where((c) => c.text.trim().isNotEmpty)
                     .map(
                       (c) => Padding(
-                        padding: const EdgeInsets.only(left: 44, bottom: 6),
+                        padding: const EdgeInsets.only(left: 52, bottom: 6),
                         child: Row(
                           children: [
                             Icon(
@@ -138,7 +181,7 @@ class QuizQuestionCard extends StatelessWidget {
                   question.answers.any((a) => a.text.trim().isNotEmpty)) ...[
                 const SizedBox(height: 14),
                 Padding(
-                  padding: const EdgeInsets.only(left: 44),
+                  padding: const EdgeInsets.only(left: 52),
                   child: Wrap(
                     spacing: 8,
                     runSpacing: 8,
