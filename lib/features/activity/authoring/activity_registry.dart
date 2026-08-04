@@ -34,7 +34,7 @@ class ActivityRegistry {
       modname: 'quiz',
       label: 'Quiz',
       icon: Icons.quiz_rounded,
-      enabled: false,
+      enabled: true,
     ),
     ActivityTypeEntry(
       modname: 'page',

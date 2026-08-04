@@ -4,6 +4,7 @@ import '../../activity/authoring/activity_picker.dart';
 import '../../activity/authoring/assignment_editor_screen.dart';
 import '../../activity/presentation/activity_screen.dart';
 import '../../activity/renderers/widgets/html_content.dart';
+import '../../quiz_studio/presentation/quiz_create_screen.dart';
 import '../data/courses_repository.dart';
 
 class CourseScreen extends StatefulWidget {
@@ -341,6 +342,23 @@ class _CourseScreenState extends State<CourseScreen> {
     }
   }
 
+  Future<void> _openQuizCreator({int? sectionId}) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => QuizCreateScreen(
+          courseId: widget.courseId,
+          initialSectionId: sectionId,
+        ),
+      ),
+    );
+    if (saved == true && mounted) {
+      setState(_reload);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Quiz published to Moodle.')),
+      );
+    }
+  }
+
   Future<void> _openAssignmentEditor({
     required int sectionId,
     int? cmid,
@@ -373,6 +391,10 @@ class _CourseScreenState extends State<CourseScreen> {
       await _openAssignmentEditor(sectionId: sectionId);
       return;
     }
+    if (entry.modname == 'quiz') {
+      await _openQuizCreator(sectionId: sectionId);
+      return;
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${entry.label} is coming soon.')),
@@ -388,6 +410,12 @@ class _CourseScreenState extends State<CourseScreen> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         actions: [
+          if (_teacherMode)
+            IconButton(
+              tooltip: 'Create quiz',
+              onPressed: () => _openQuizCreator(),
+              icon: const Icon(Icons.quiz_outlined),
+            ),
           if (_teacherMode)
             IconButton(
               tooltip: 'Add section',
