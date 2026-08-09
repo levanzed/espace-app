@@ -30,41 +30,56 @@ class LatexHtmlContent extends StatelessWidget {
 
     final segments = _splitMath(source);
     if (segments.length == 1 && !segments.first.isMath) {
-      return HtmlWidget(
-        source,
-        textStyle: textStyle ?? Theme.of(context).textTheme.bodyLarge,
+      return _bounded(
+        HtmlWidget(
+          source,
+          textStyle: textStyle ?? Theme.of(context).textTheme.bodyLarge,
+        ),
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final segment in segments)
-          if (segment.isMath)
-            Padding(
-              padding: EdgeInsets.symmetric(
-                vertical: segment.display ? 8 : 2,
-                horizontal: segment.display ? 0 : 2,
-              ),
-              child: Align(
-                alignment: segment.display
-                    ? Alignment.centerLeft
-                    : Alignment.centerLeft,
-                child: Math.tex(
-                  segment.latex,
-                  mathStyle: segment.display ? MathStyle.display : MathStyle.text,
+    return _bounded(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final segment in segments)
+            if (segment.isMath)
+              Padding(
+                padding: EdgeInsets.symmetric(
+                  vertical: segment.display ? 8 : 2,
+                  horizontal: segment.display ? 0 : 2,
+                ),
+                child: Align(
+                  alignment: segment.display
+                      ? Alignment.centerLeft
+                      : Alignment.centerLeft,
+                  child: Math.tex(
+                    segment.latex,
+                    mathStyle: segment.display ? MathStyle.display : MathStyle.text,
+                    textStyle: textStyle ?? Theme.of(context).textTheme.bodyLarge,
+                  ),
+                ),
+              )
+            else if (segment.html.trim().isNotEmpty)
+              _bounded(
+                HtmlWidget(
+                  segment.html,
                   textStyle: textStyle ?? Theme.of(context).textTheme.bodyLarge,
                 ),
               ),
-            )
-          else if (segment.html.trim().isNotEmpty)
-            HtmlWidget(
-              segment.html,
-              textStyle: textStyle ?? Theme.of(context).textTheme.bodyLarge,
-            ),
-      ],
+        ],
+      ),
     );
+  }
+
+  /// Constrain width so `max-width` / `width` CSS on images is respected.
+  ///
+  /// `flutter_widget_from_html` applies `CssSizingHint(maxWidth: bc.maxWidth)`
+  /// to images; without a bounded parent the image renders at natural size.
+  /// Forcing full width makes the parent's maxWidth finite so CSS sizing works.
+  Widget _bounded(Widget child) {
+    return SizedBox(width: double.infinity, child: child);
   }
 
   /// Split HTML into alternating HTML / math segments.

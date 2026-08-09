@@ -3,6 +3,7 @@ import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
 
 import 'espace_rich_text.dart';
+import 'latex_html_content.dart';
 
 /// Shared ESPACE WYSIWYG field (Quill). Teachers never edit raw HTML.
 ///
@@ -51,12 +52,15 @@ class _EspaceRichTextFieldState extends State<EspaceRichTextField> {
 
   late final FocusNode _focusNode;
   late final ScrollController _scrollController;
+  String _liveHtml = '';
 
   @override
   void initState() {
     super.initState();
     _focusNode = FocusNode();
     _scrollController = ScrollController();
+    _liveHtml = EspaceRichText.htmlFromDocument(widget.controller.document);
+    widget.controller.addListener(_onDocumentChanged);
     if (widget.autofocus) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _focusNode.requestFocus();
@@ -64,8 +68,16 @@ class _EspaceRichTextFieldState extends State<EspaceRichTextField> {
     }
   }
 
+  void _onDocumentChanged() {
+    final html = EspaceRichText.htmlFromDocument(widget.controller.document);
+    if (html != _liveHtml) {
+      setState(() => _liveHtml = html);
+    }
+  }
+
   @override
   void dispose() {
+    widget.controller.removeListener(_onDocumentChanged);
     _focusNode.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -206,6 +218,29 @@ class _EspaceRichTextFieldState extends State<EspaceRichTextField> {
                 ),
               ),
             ),
+            if (_liveHtml.contains(r'\(') || _liveHtml.contains(r'\[')) ...[
+              Divider(height: 1, color: Colors.grey.shade200),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'EQUATION PREVIEW',
+                      style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Reuses the exact same renderer as preview/attempt/review.
+                    LatexHtmlContent(html: _liveHtml),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
