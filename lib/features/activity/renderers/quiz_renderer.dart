@@ -41,8 +41,31 @@ class _QuizView extends StatefulWidget {
 }
 
 class _QuizViewState extends State<_QuizView> {
+  /// Refreshable copy of the activity so the attempt list / open-attempt
+  /// detection stay fresh after start / resume / submit (the parent-supplied
+  /// [Activity] is fetched once and never updated).
+  late Activity _activity;
+
   bool _busy = false;
   String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _activity = widget.activity;
+    _refreshActivity();
+  }
+
+  /// Re-fetch the activity so in-progress / finished attempt state is current.
+  Future<void> _refreshActivity() async {
+    try {
+      final fresh = await widget.repository.getActivity(widget.activity.id);
+      if (!mounted) return;
+      setState(() => _activity = fresh);
+    } catch (_) {
+      // Non-fatal: keep last known activity state.
+    }
+  }
   Map<String, dynamic>? _attemptData;
   Map<String, dynamic>? _review;
   /// slot → Moodle answer field value (radio value or typed text).
@@ -75,12 +98,12 @@ class _QuizViewState extends State<_QuizView> {
   }
 
   Map<String, dynamic> get _quiz => Map<String, dynamic>.from(
-        widget.activity.details['quiz'] as Map? ?? const {},
+        _activity.details['quiz'] as Map? ?? const {},
       );
 
   List<dynamic> get _attempts {
     final attemptsData = Map<String, dynamic>.from(
-      widget.activity.details['attempts'] as Map? ?? const {},
+      _activity.details['attempts'] as Map? ?? const {},
     );
     return List<dynamic>.from(attemptsData['attempts'] ?? const []);
   }
@@ -88,7 +111,12 @@ class _QuizViewState extends State<_QuizView> {
   Map<String, dynamic>? get _openAttempt {
     for (final attempt in _attempts) {
       final map = Map<String, dynamic>.from(attempt as Map);
-      if (map['state'] == 'inprogress') return map;
+      final state = map['state']?.toString();
+      // 'inprogress' and 'overdue' are both resumable (overdue attempts can be
+      // resumed within the grace period). Treating only 'inprogress' as open
+      // caused the Resume button to never appear and Start to be rejected by
+      // Moodle with "attempt in progress".
+      if (state == 'inprogress' || state == 'overdue') return map;
     }
     return null;
   }
@@ -356,6 +384,7 @@ class _QuizViewState extends State<_QuizView> {
       }
       await _loadAttempt(attemptId);
       setState(() => _message = 'Attempt $attemptId resumed.');
+      await _refreshActivity();
     } catch (error) {
       setState(() => _message = _friendlyError(error));
     } finally {
@@ -385,6 +414,7 @@ class _QuizViewState extends State<_QuizView> {
       }
       await _loadAttempt(attemptId);
       setState(() => _message = 'Attempt $attemptId started.');
+      await _refreshActivity();
     } catch (error) {
       setState(() => _message = _friendlyError(error));
     } finally {
@@ -435,6 +465,7 @@ class _QuizViewState extends State<_QuizView> {
       }
       await _loadAttempt(attemptId);
       setState(() => _message = 'Attempt $attemptId started.');
+      await _refreshActivity();
     } catch (error) {
       setState(() => _message = _friendlyError(error));
     } finally {
@@ -586,6 +617,7 @@ class _QuizViewState extends State<_QuizView> {
         _stopTimer();
         _message = 'Attempt submitted.';
       });
+      await _refreshActivity();
     } catch (error) {
       setState(() => _message = _friendlyError(error));
     } finally {
@@ -702,7 +734,9 @@ class _QuizViewState extends State<_QuizView> {
             ),
           )
         else
-          ..._attempts.map((attempt) {
+          ..._attempts.asMap().entries.map((entry) {
+            final index = entry.key;
+            final attempt = entry.value;
             final map = Map<String, dynamic>.from(attempt as Map);
             final state = map['state']?.toString() ?? 'unknown';
             final stateLabel = _stateLabel(state);
@@ -710,7 +744,10 @@ class _QuizViewState extends State<_QuizView> {
               margin: const EdgeInsets.only(bottom: 12),
               child: ListTile(
                 leading: const Icon(Icons.fact_check_rounded),
-                title: Text('Attempt ${map['attempt'] ?? ''}'),
+                // Moodle's `attempt` field can be the attempt id (e.g. 26)
+                // rather than the sequential number. Use the list position so
+                // students see Attempt 1, 2, 3… as expected.
+                title: Text('Attempt ${index + 1}'),
                 subtitle: Text(
                   'State: $stateLabel • Grade: ${map['sumgrades'] ?? '-'}',
                 ),

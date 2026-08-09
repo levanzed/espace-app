@@ -72,6 +72,24 @@ class ShortAnswerEntryDraft {
 
 enum QuizQuestionType { multipleChoice, shortAnswer }
 
+/// When question feedback (correct/incorrect/general) is shown to students.
+enum FeedbackRelease {
+  /// Never show feedback.
+  never,
+
+  /// Show immediately after the attempt is submitted.
+  immediately,
+
+  /// Show only after the quiz open date has passed.
+  afterOpen,
+
+  /// Show only after the quiz close date has passed.
+  afterClose,
+
+  /// Show only after the student's attempt is finished.
+  afterAttempt,
+}
+
 /// Quiz settings for Studio authoring.
 ///
 /// Sent on publish via `payload.settings` (local_espace 1.1.15+).
@@ -85,6 +103,7 @@ class QuizSettingsDraft {
     this.timeOpen,
     this.timeClose,
     this.questionsPerPage = 0,
+    this.feedbackRelease = FeedbackRelease.immediately,
   });
 
   /// 0 = no limit.
@@ -101,6 +120,9 @@ class QuizSettingsDraft {
   /// 0 = all questions on one page; otherwise questions per page.
   int questionsPerPage;
 
+  /// When question feedback is released to students.
+  FeedbackRelease feedbackRelease;
+
   Map<String, dynamic> toJson() => {
         'timeLimitSeconds': timeLimitSeconds,
         'attemptsAllowed': attemptsAllowed,
@@ -110,6 +132,7 @@ class QuizSettingsDraft {
         'timeOpen': timeOpen?.toIso8601String(),
         'timeClose': timeClose?.toIso8601String(),
         'questionsPerPage': questionsPerPage,
+        'feedbackRelease': feedbackRelease.name,
       };
 
   factory QuizSettingsDraft.fromJson(Map<String, dynamic>? json) {
@@ -123,7 +146,24 @@ class QuizSettingsDraft {
       timeOpen: _parseDate(json['timeOpen']),
       timeClose: _parseDate(json['timeClose']),
       questionsPerPage: (json['questionsPerPage'] as num?)?.toInt() ?? 0,
+      feedbackRelease: _parseFeedbackRelease(json['feedbackRelease']),
     );
+  }
+
+  static FeedbackRelease _parseFeedbackRelease(Object? value) {
+    if (value == null) return FeedbackRelease.immediately;
+    switch (value.toString()) {
+      case 'never':
+        return FeedbackRelease.never;
+      case 'afterOpen':
+        return FeedbackRelease.afterOpen;
+      case 'afterClose':
+        return FeedbackRelease.afterClose;
+      case 'afterAttempt':
+        return FeedbackRelease.afterAttempt;
+      default:
+        return FeedbackRelease.immediately;
+    }
   }
 
   static DateTime? _parseDate(Object? value) {
@@ -360,6 +400,7 @@ class QuizDraft {
           ? s.timeClose!.millisecondsSinceEpoch ~/ 1000
           : 0,
       'questionsperpage': s.questionsPerPage,
+      'feedbackrelease': s.feedbackRelease.name,
     };
   }
 

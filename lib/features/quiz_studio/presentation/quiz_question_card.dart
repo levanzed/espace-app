@@ -179,7 +179,7 @@ class QuizQuestionCard extends StatelessWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                c.text.trim(),
+                                _stripHtml(c.text),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -220,7 +220,7 @@ class QuizQuestionCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              a.text.trim(),
+                              _stripHtml(a.text),
                               style: const TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
@@ -243,6 +243,15 @@ class QuizQuestionCard extends StatelessWidget {
   static String _formatMark(double mark) {
     if (mark == mark.roundToDouble()) return mark.toInt().toString();
     return mark.toString();
+  }
+
+  /// Strip HTML tags/entities so the card preview shows clean text (choices &
+  /// answers are Quill rich-text HTML — e.g. `<p>…</p>`, `&`).
+  static String _stripHtml(String input) {
+    return input
+        .replaceAll(RegExp(r'<[^>]+>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 }
 

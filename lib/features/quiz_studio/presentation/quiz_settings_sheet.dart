@@ -38,6 +38,7 @@ class _QuizSettingsSheetState extends State<QuizSettingsSheet> {
   late DateTime? _timeOpen;
   late DateTime? _timeClose;
   late int _questionsPerPage;
+  late FeedbackRelease _feedbackRelease;
   bool _customQpp = false;
 
   @override
@@ -58,6 +59,7 @@ class _QuizSettingsSheetState extends State<QuizSettingsSheet> {
     _timeOpen = s.timeOpen;
     _timeClose = s.timeClose;
     _questionsPerPage = s.questionsPerPage;
+    _feedbackRelease = s.feedbackRelease;
     _customQpp = !_qppPresets.contains(s.questionsPerPage) && s.questionsPerPage > 0;
     _customQppController = TextEditingController(
       text: _customQpp ? '${s.questionsPerPage}' : '',
@@ -93,6 +95,7 @@ class _QuizSettingsSheetState extends State<QuizSettingsSheet> {
         timeOpen: _timeOpen,
         timeClose: _timeClose,
         questionsPerPage: qpp,
+        feedbackRelease: _feedbackRelease,
       ),
     );
   }
@@ -258,6 +261,43 @@ class _QuizSettingsSheetState extends State<QuizSettingsSheet> {
                 ),
               ),
             ],
+            const SizedBox(height: 20),
+            const _SectionHeader(label: 'Feedback'),
+            const SizedBox(height: 4),
+            Text(
+              'When to release question feedback to students',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<FeedbackRelease>(
+              initialValue: _feedbackRelease,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: FeedbackRelease.immediately,
+                  child: Text('Immediately after submission'),
+                ),
+                DropdownMenuItem(
+                  value: FeedbackRelease.afterAttempt,
+                  child: Text('After the attempt is finished'),
+                ),
+                DropdownMenuItem(
+                  value: FeedbackRelease.afterOpen,
+                  child: Text('After the quiz opens'),
+                ),
+                DropdownMenuItem(
+                  value: FeedbackRelease.afterClose,
+                  child: Text('After the quiz closes'),
+                ),
+                DropdownMenuItem(
+                  value: FeedbackRelease.never,
+                  child: Text('Never'),
+                ),
+              ],
+              onChanged: (v) => setState(() => _feedbackRelease = v ?? _feedbackRelease),
+            ),
             const SizedBox(height: 20),
             FilledButton(
               onPressed: _save,
