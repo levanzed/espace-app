@@ -277,7 +277,11 @@ class _QuizViewState extends State<_QuizView> {
 
     setState(() {
       _attemptData = data;
-      _currentPage = _asInt(attempt['currentpage']) ?? page;
+      // IMPORTANT: attempt['currentpage'] is the attempt's DB-recorded page
+      // (stays 0 until Moodle navigates/saves), NOT the page just loaded.
+      // Using the requested [page] here is what actually switches the UI to
+      // the next set of questions.
+      _currentPage = page;
       _hasPrevPage = (_prevPage ?? -1) >= 0;
       _hasNextPage = (_nextPage ?? -1) >= 0;
       _reviewMode = false;
