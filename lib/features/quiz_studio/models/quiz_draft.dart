@@ -32,7 +32,8 @@ class McqChoiceDraft {
   bool correct;
 
   Map<String, dynamic> toJson() => {
-        'text': {'format': 'plain', 'text': text},
+        // Choices are rich-text (Quill HTML) so bold/italic/LaTeX survive.
+        'text': {'format': 'html', 'text': text},
         'correct': correct,
       };
 

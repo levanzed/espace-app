@@ -54,6 +54,8 @@ class _QuizViewState extends State<_QuizView> {
   final Map<int, List<ParsedQuizQuestion>> _questionsByPage = {};
 
   int _currentPage = 0;
+  int? _nextPage;
+  int? _prevPage;
   bool _hasPrevPage = false;
   bool _hasNextPage = false;
   bool _reviewMode = false;
@@ -267,15 +269,17 @@ class _QuizViewState extends State<_QuizView> {
     }
 
     // Moodle returns nextpage/previouspage at the top level of the
-    // get_attempt_data response, NOT inside the attempt object.
-    final nextpage = _asInt(data['nextpage'] ?? attempt['nextpage']);
-    final prevpage = _asInt(data['previouspage'] ?? attempt['previouspage']);
+    // get_attempt_data response, NOT inside the attempt object. These are the
+    // actual page numbers to navigate to (may not be currentPage ± 1 when
+    // sections/breaks create non-contiguous pages in the nav sequence).
+    _nextPage = _asInt(data['nextpage'] ?? attempt['nextpage']);
+    _prevPage = _asInt(data['previouspage'] ?? attempt['previouspage']);
 
     setState(() {
       _attemptData = data;
       _currentPage = _asInt(attempt['currentpage']) ?? page;
-      _hasPrevPage = (prevpage ?? -1) >= 0;
-      _hasNextPage = (nextpage ?? -1) >= 0;
+      _hasPrevPage = (_prevPage ?? -1) >= 0;
+      _hasNextPage = (_nextPage ?? -1) >= 0;
       _reviewMode = false;
 
       if (timeLeft != null && timeLeft > 0) {
@@ -290,14 +294,12 @@ class _QuizViewState extends State<_QuizView> {
 
   /// Walk remaining pages so review / submit cover the whole attempt.
   Future<void> _cacheAllRemainingPages(int attemptId) async {
-    var page = _currentPage;
-    var hasNext = _hasNextPage;
-    while (hasNext) {
-      page += 1;
+    var next = _nextPage;
+    while (next != null && next >= 0) {
       final data = await widget.repository.getQuizAttemptData(
         widget.activity.id,
         attemptId,
-        page: page,
+        page: next,
       );
       final questions = List<dynamic>.from(data['questions'] ?? const []);
       final parsed = questions
@@ -305,10 +307,10 @@ class _QuizViewState extends State<_QuizView> {
                 Map<String, dynamic>.from(q as Map),
               ))
           .toList();
-      _questionsByPage[page] = parsed;
+      _questionsByPage[next] = parsed;
       await _ensureControllers(parsed);
       // Moodle returns nextpage at the top level of the response.
-      hasNext = (_asInt(data['nextpage']) ?? -1) >= 0;
+      next = _asInt(data['nextpage']);
     }
   }
 
@@ -331,7 +333,8 @@ class _QuizViewState extends State<_QuizView> {
     }
   }
 
-  Future<void> _start() async {
+  /// Resume the existing open (in-progress) attempt.
+  Future<void> _resume() async {
     setState(() {
       _busy = true;
       _message = null;
@@ -339,15 +342,65 @@ class _QuizViewState extends State<_QuizView> {
     });
     try {
       final open = _openAttempt;
-      if (open != null) {
-        final attemptId = _asInt(open['id']);
-        if (attemptId != null) {
-          await _loadAttempt(attemptId);
-          setState(() => _message = 'Attempt $attemptId resumed.');
-          return;
-        }
+      if (open == null) {
+        setState(() => _message = 'No open attempt to resume.');
+        return;
       }
+      final attemptId = _asInt(open['id']);
+      if (attemptId == null) {
+        throw Exception('Quiz attempt id missing');
+      }
+      await _loadAttempt(attemptId);
+      setState(() => _message = 'Attempt $attemptId resumed.');
+    } catch (error) {
+      setState(() => _message = _friendlyError(error));
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
 
+  /// Start a BRAND-NEW attempt (only when attempts remain).
+  Future<void> _startNew() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+      _review = null;
+    });
+    try {
+      if (!_hasAttemptsRemaining) {
+        setState(() => _message = 'No attempts remaining.');
+        return;
+      }
+      final started =
+          await widget.repository.startQuizAttempt(widget.activity.id);
+      final attempt =
+          Map<String, dynamic>.from(started['attempt'] as Map? ?? started);
+      final attemptId = _asInt(attempt['id']);
+      if (attemptId == null) {
+        throw Exception('Quiz attempt id missing');
+      }
+      await _loadAttempt(attemptId);
+      setState(() => _message = 'Attempt $attemptId started.');
+    } catch (error) {
+      setState(() => _message = _friendlyError(error));
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  /// No open attempt: start new if attempts remain, else show last review.
+  Future<void> _start() async {
+    if (_openAttempt != null) {
+      // The dedicated Resume button handles this; guard here anyway.
+      await _resume();
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _message = null;
+      _review = null;
+    });
+    try {
       if (!_hasAttemptsRemaining) {
         final last = _lastFinishedAttempt;
         if (last != null) {
@@ -672,11 +725,31 @@ class _QuizViewState extends State<_QuizView> {
           Text(_message!),
         ],
         const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: _busy ? null : _start,
-          icon: Icon(buttonIcon),
-          label: Text(buttonLabel),
-        ),
+        if (hasOpen && _hasAttemptsRemaining)
+          // Open attempt exists AND attempts remain → offer both Resume (primary)
+          // and Start a new attempt (secondary).
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FilledButton.icon(
+                onPressed: _busy ? null : _resume,
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('Resume attempt'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _startNew,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Start a new attempt'),
+              ),
+            ],
+          )
+        else
+          FilledButton.icon(
+            onPressed: _busy ? null : _start,
+            icon: Icon(buttonIcon),
+            label: Text(buttonLabel),
+          ),
         if (!_reviewMode && _currentPageQuestions.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text(
@@ -710,17 +783,17 @@ class _QuizViewState extends State<_QuizView> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              if (_hasPrevPage)
+              if (_hasPrevPage && _prevPage != null)
                 OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _goToPage(_currentPage - 1),
+                  onPressed: _busy ? null : () => _goToPage(_prevPage!),
                   icon: const Icon(Icons.chevron_left_rounded),
                   label: const Text('Previous'),
                 )
               else
                 const SizedBox(width: 120),
-              if (_hasNextPage)
+              if (_hasNextPage && _nextPage != null)
                 FilledButton.icon(
-                  onPressed: _busy ? null : () => _goToPage(_currentPage + 1),
+                  onPressed: _busy ? null : () => _goToPage(_nextPage!),
                   label: const Text('Next'),
                   icon: const Icon(Icons.chevron_right_rounded),
                   iconAlignment: IconAlignment.end,

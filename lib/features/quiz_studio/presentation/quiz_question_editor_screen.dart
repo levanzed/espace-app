@@ -27,10 +27,7 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
 
   late final QuillController _stemController;
   late final TextEditingController _mark;
-  late List<TextEditingController> _options;
-  // One FocusNode per option/answer field so typing LaTeX in an accepted
-  // answer never loses focus back to the autofocused question stem.
-  late List<FocusNode> _optionFocusNodes;
+  late List<QuillController> _options;
   // Rich-text feedback fields (LaTeX `\( … \)` renders everywhere).
   late final QuillController _generalFeedback;
   late final QuillController _correctFeedback;
@@ -60,23 +57,26 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
 
     if (_isMcq) {
       if (e != null && e.choices.isNotEmpty) {
-        _options =
-            e.choices.map((c) => TextEditingController(text: c.text)).toList();
+        _options = e.choices
+            .map((c) => EspaceRichTextField.controllerFromHtml(c.text))
+            .toList();
         _correctIndex = e.choices.indexWhere((c) => c.correct);
         if (_correctIndex < 0) _correctIndex = 0;
       } else {
-        _options = [TextEditingController(), TextEditingController()];
+        _options = [
+          EspaceRichTextField.controllerFromHtml(null),
+          EspaceRichTextField.controllerFromHtml(null),
+        ];
       }
     } else {
       if (e != null && e.answers.isNotEmpty) {
-        _options =
-            e.answers.map((a) => TextEditingController(text: a.text)).toList();
+        _options = e.answers
+            .map((a) => EspaceRichTextField.controllerFromHtml(a.text))
+            .toList();
       } else {
-        _options = [TextEditingController()];
+        _options = [EspaceRichTextField.controllerFromHtml(null)];
       }
     }
-    _optionFocusNodes =
-        List.generate(_options.length, (_) => FocusNode(debugLabel: 'option'));
   }
 
   @override
@@ -90,16 +90,12 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     for (final c in _options) {
       c.dispose();
     }
-    for (final f in _optionFocusNodes) {
-      f.dispose();
-    }
     super.dispose();
   }
 
   void _addOption() {
     setState(() {
-      _options.add(TextEditingController());
-      _optionFocusNodes.add(FocusNode(debugLabel: 'option'));
+      _options.add(EspaceRichTextField.controllerFromHtml(null));
     });
   }
 
@@ -109,8 +105,6 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     setState(() {
       _options[index].dispose();
       _options.removeAt(index);
-      _optionFocusNodes[index].dispose();
-      _optionFocusNodes.removeAt(index);
       if (_correctIndex >= _options.length) {
         _correctIndex = _options.length - 1;
       }
@@ -141,7 +135,7 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     if (_isMcq) {
       final filled = <McqChoiceDraft>[];
       for (var i = 0; i < _options.length; i++) {
-        final text = _options[i].text.trim();
+        final text = EspaceRichTextField.htmlOf(_options[i]).trim();
         if (text.isEmpty) continue;
         filled.add(McqChoiceDraft(text: text, correct: i == _correctIndex));
       }
@@ -176,7 +170,7 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     }
 
     final answers = _options
-        .map((c) => c.text.trim())
+        .map((c) => EspaceRichTextField.htmlOf(c).trim())
         .where((t) => t.isNotEmpty)
         .map((t) => ShortAnswerEntryDraft(text: t))
         .toList();
@@ -277,13 +271,11 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
                             children: [
                               Radio<int>(value: index),
                               Expanded(
-                                child: TextField(
+                                child: EspaceRichTextField(
                                   controller: _options[index],
-                                  focusNode: _optionFocusNodes[index],
-                                  decoration: InputDecoration(
-                                    hintText: 'Choice ${index + 1}',
-                                    border: InputBorder.none,
-                                  ),
+                                  hintText: 'Choice ${index + 1}',
+                                  minHeight: 40,
+                                  maxHeight: 120,
                                 ),
                               ),
                               if (_options.length > 2)
@@ -322,13 +314,11 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
                           ),
                         ),
                         Expanded(
-                          child: TextField(
+                          child: EspaceRichTextField(
                             controller: _options[index],
-                            focusNode: _optionFocusNodes[index],
-                            decoration: InputDecoration(
-                              hintText: 'Answer ${index + 1}',
-                              border: InputBorder.none,
-                            ),
+                            hintText: 'Answer ${index + 1}',
+                            minHeight: 40,
+                            maxHeight: 120,
                           ),
                         ),
                         if (_options.length > 1)
