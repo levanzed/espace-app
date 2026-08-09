@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 
+import '../../../core/rich_text/espace_rich_text_field.dart';
 import '../models/quiz_draft.dart';
 
 /// Full-screen question editor (replaces cramped dialogs).
@@ -23,7 +25,7 @@ class QuizQuestionEditorScreen extends StatefulWidget {
 class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
   static const Color _accent = Color(0xFF5B4B8A);
 
-  late final TextEditingController _stem;
+  late final QuillController _stemController;
   late final TextEditingController _mark;
   late List<TextEditingController> _options;
   int _correctIndex = 0;
@@ -36,7 +38,7 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
   void initState() {
     super.initState();
     final e = widget.existing;
-    _stem = TextEditingController(text: e?.stem ?? '');
+    _stemController = EspaceRichTextField.controllerFromHtml(e?.stem);
     _mark = TextEditingController(text: (e?.mark ?? 1.0).toString());
     _caseSensitive = e?.caseSensitive ?? false;
 
@@ -61,7 +63,7 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
 
   @override
   void dispose() {
-    _stem.dispose();
+    _stemController.dispose();
     _mark.dispose();
     for (final c in _options) {
       c.dispose();
@@ -85,43 +87,13 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     });
   }
 
-  void _wrapStem(String left, String right) {
-    final text = _stem.text;
-    final selection = _stem.selection;
-    if (!selection.isValid) {
-      _stem.text = '$left$text$right';
-      _stem.selection = TextSelection.collapsed(offset: _stem.text.length);
-      return;
-    }
-    final start = selection.start;
-    final end = selection.end;
-    final selected = text.substring(start, end);
-    final next = text.replaceRange(start, end, '$left$selected$right');
-    _stem.value = TextEditingValue(
-      text: next,
-      selection: TextSelection.collapsed(
-        offset: start + left.length + selected.length + right.length,
-      ),
-    );
-  }
-
-  void _insertStem(String snippet) {
-    final text = _stem.text;
-    final selection = _stem.selection;
-    final offset = selection.isValid ? selection.start : text.length;
-    final next = text.replaceRange(offset, offset, snippet);
-    _stem.value = TextEditingValue(
-      text: next,
-      selection: TextSelection.collapsed(offset: offset + snippet.length),
-    );
-  }
-
   void _save() {
-    final stem = _stem.text.trim();
-    if (stem.isEmpty) {
+    if (EspaceRichTextField.isBlank(_stemController)) {
       setState(() => _localError = 'Add a question stem.');
       return;
     }
+    final stem = EspaceRichTextField.htmlOf(_stemController);
+
     final mark = double.tryParse(_mark.text.trim()) ?? 0;
     if (mark <= 0) {
       setState(() => _localError = 'Mark must be greater than zero.');
@@ -215,71 +187,12 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
             _ErrorBanner(message: _localError!),
             const SizedBox(height: 16),
           ],
-          _SectionLabel(label: 'Question'),
+          const _SectionLabel(label: 'Question'),
           const SizedBox(height: 10),
-          Material(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            child: Column(
-              children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        tooltip: 'Bold',
-                        onPressed: () => _wrapStem('<b>', '</b>'),
-                        icon: const Icon(Icons.format_bold),
-                      ),
-                      IconButton(
-                        tooltip: 'Italic',
-                        onPressed: () => _wrapStem('<i>', '</i>'),
-                        icon: const Icon(Icons.format_italic),
-                      ),
-                      IconButton(
-                        tooltip: 'Bullet list',
-                        onPressed: () => _insertStem('<ul><li></li></ul>'),
-                        icon: const Icon(Icons.format_list_bulleted),
-                      ),
-                      IconButton(
-                        tooltip: 'Link',
-                        onPressed: () => _wrapStem('<a href="">', '</a>'),
-                        icon: const Icon(Icons.link),
-                      ),
-                      IconButton(
-                        tooltip: 'Image URL',
-                        onPressed: () =>
-                            _insertStem('<img src="" alt="" />'),
-                        icon: const Icon(Icons.image_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'LaTeX',
-                        onPressed: () => _wrapStem(r'\(', r'\)'),
-                        icon: const Icon(Icons.functions),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                TextField(
-                  controller: _stem,
-                  autofocus: isNew,
-                  maxLines: 5,
-                  minLines: 3,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: 'Write the question…',
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.fromLTRB(16, 12, 16, 16),
-                  ),
-                ),
-              ],
-            ),
+          EspaceRichTextField(
+            controller: _stemController,
+            hintText: 'Write the question…',
+            autofocus: isNew,
           ),
           const SizedBox(height: 16),
           SizedBox(

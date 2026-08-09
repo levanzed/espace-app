@@ -4,7 +4,9 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 
+import '../../../core/rich_text/espace_rich_text_field.dart';
 import '../../courses/data/courses_repository.dart';
 import '../data/local_question_bank.dart';
 import '../data/quiz_draft_store.dart';
@@ -50,7 +52,7 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
   final _draftStore = QuizDraftStore();
   final _questionBank = LocalQuestionBank();
   final _titleController = TextEditingController();
-  final _introController = TextEditingController();
+  late QuillController _introController;
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
   late QuizDraft _draft;
@@ -76,7 +78,7 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
         );
     _draft.courseId ??= widget.courseId;
     _titleController.text = _draft.title;
-    _introController.text = _draft.introText;
+    _introController = EspaceRichTextField.controllerFromHtml(_draft.introText);
     _sectionId = _draft.sectionId ?? widget.initialSectionId;
     _titleController.addListener(_onDraftFieldChanged);
     _introController.addListener(_onDraftFieldChanged);
@@ -129,7 +131,7 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
 
   void _syncControllersIntoDraft() {
     _draft.title = _titleController.text;
-    _draft.introText = _introController.text;
+    _draft.introText = EspaceRichTextField.htmlOf(_introController);
     _draft.sectionId = _sectionId;
     _draft.courseId = widget.courseId;
   }
@@ -150,13 +152,16 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
   Future<void> _newDraft() async {
     final discard = await _confirmLeaveIfDirty();
     if (!discard || !mounted) return;
+    _introController.removeListener(_onDraftFieldChanged);
+    _introController.dispose();
     setState(() {
       _draft = QuizDraft(
         courseId: widget.courseId,
         sectionId: _sectionId,
       );
       _titleController.text = '';
-      _introController.text = '';
+      _introController = EspaceRichTextField.controllerFromHtml('');
+      _introController.addListener(_onDraftFieldChanged);
       _dirty = false;
       _autosaveLabel = null;
       _error = null;
@@ -174,10 +179,13 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
     if (selected.id == _draft.id) return;
     final ok = await _confirmLeaveIfDirty();
     if (!ok || !mounted) return;
+    _introController.removeListener(_onDraftFieldChanged);
+    _introController.dispose();
     setState(() {
       _draft = selected;
       _titleController.text = _draft.title;
-      _introController.text = _draft.introText;
+      _introController = EspaceRichTextField.controllerFromHtml(_draft.introText);
+      _introController.addListener(_onDraftFieldChanged);
       if (_draft.sectionId != null) _sectionId = _draft.sectionId;
       _dirty = false;
       _autosaveLabel = 'Draft opened';
@@ -269,7 +277,10 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
       setState(() {
         _draft = imported;
         _titleController.text = _draft.title;
-        _introController.text = _draft.introText;
+        _introController.removeListener(_onDraftFieldChanged);
+        _introController.dispose();
+        _introController = EspaceRichTextField.controllerFromHtml(_draft.introText);
+        _introController.addListener(_onDraftFieldChanged);
         _error = null;
       });
       _markDirty();
@@ -492,7 +503,7 @@ class _QuizCreateScreenState extends State<QuizCreateScreen> {
     if (_publishing) return;
 
     _draft.title = _titleController.text;
-    _draft.introText = _introController.text;
+    _draft.introText = EspaceRichTextField.htmlOf(_introController);
 
     final validation = _draft.validateForPublish();
     if (validation != null) {
@@ -792,7 +803,7 @@ class _DetailsCard extends StatelessWidget {
   });
 
   final TextEditingController titleController;
-  final TextEditingController introController;
+  final QuillController introController;
   final bool showInstructions;
   final VoidCallback onToggleInstructions;
   final int? sectionId;
@@ -871,7 +882,7 @@ class _DetailsCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    showInstructions || introController.text.trim().isNotEmpty
+                    showInstructions || !EspaceRichTextField.isBlank(introController)
                         ? 'Instructions'
                         : 'Add instructions (optional)',
                     style: const TextStyle(fontWeight: FontWeight.w600),
@@ -882,19 +893,11 @@ class _DetailsCard extends StatelessWidget {
             if (showInstructions)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: TextField(
+                child: EspaceRichTextField(
                   controller: introController,
-                  maxLines: 4,
-                  minLines: 2,
-                  decoration: InputDecoration(
-                    hintText: 'Shown to students before they start…',
-                    filled: true,
-                    fillColor: const Color(0xFFF7F8FA),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
+                  hintText: 'Shown to students before they start…',
+                  minHeight: 90,
+                  maxHeight: 180,
                 ),
               ),
           ],

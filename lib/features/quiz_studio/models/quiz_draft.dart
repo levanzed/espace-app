@@ -264,17 +264,53 @@ class QuizDraft {
 
   Map<String, dynamic> toPublishRequest() {
     final intro = introText.trim();
-    return {
-      'payload': {
-        'title': title.trim(),
-        'intro': {
-          'format': 'html',
-          'text': intro.isEmpty
-              ? ''
-              : (intro.contains('<') ? intro : '<p>$intro</p>'),
-        },
-        'questions': questions.map((q) => q.toJson()).toList(),
+    final payload = <String, dynamic>{
+      'title': title.trim(),
+      'intro': {
+        'format': 'html',
+        'text': intro.isEmpty
+            ? ''
+            : (intro.contains('<') ? intro : '<p>$intro</p>'),
       },
+      'questions': questions.map((q) => q.toJson()).toList(),
+    };
+    final settingsJson = _settingsToPublishJson();
+    if (settingsJson != null) {
+      payload['settings'] = settingsJson;
+    }
+    return {'payload': payload};
+  }
+
+  /// Map local [QuizSettingsDraft] to the publish API settings object.
+  ///
+  /// Returns null when all values are at Moodle defaults, keeping the payload
+  /// additive and backward compatible (no `settings` key ⇒ old behavior).
+  Map<String, dynamic>? _settingsToPublishJson() {
+    final s = settings;
+    final allDefaults = s.timeLimitSeconds <= 0 &&
+        s.attemptsAllowed <= 0 &&
+        !s.shuffleQuestions &&
+        s.shuffleAnswers &&
+        s.gradeToPass <= 0 &&
+        s.timeOpen == null &&
+        s.timeClose == null;
+    if (allDefaults) return null;
+
+    return {
+      'timelimit': s.timeLimitSeconds,
+      'attempts': s.attemptsAllowed,
+      'shufflequestions': s.shuffleQuestions,
+      'shuffleanswers': s.shuffleAnswers,
+      'gradepass': s.gradeToPass,
+      'timeopen': s.timeOpen != null
+          ? s.timeOpen!.millisecondsSinceEpoch ~/ 1000
+          : 0,
+      'timeclose': s.timeClose != null
+          ? s.timeClose!.millisecondsSinceEpoch ~/ 1000
+          : 0,
+      // Studio publishes a complete quiz on one page; keep default unless
+      // explicitly configured later.
+      'questionsperpage': 0,
     };
   }
 

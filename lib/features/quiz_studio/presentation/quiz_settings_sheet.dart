@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/quiz_draft.dart';
 
-/// Local-only quiz settings (applied to Moodle in Phase 2).
+/// Quiz settings applied to Moodle on publish.
 class QuizSettingsSheet extends StatefulWidget {
   const QuizSettingsSheet({super.key, required this.settings});
 
@@ -91,7 +91,7 @@ class _QuizSettingsSheetState extends State<QuizSettingsSheet> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Stored on this draft only. Moodle apply comes in Phase 2.',
+              'Applied when you publish this quiz to Moodle.',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
             ),
             const SizedBox(height: 16),

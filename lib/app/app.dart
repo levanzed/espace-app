@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 
 import '../core/theme/theme.dart';
 import 'router.dart';
@@ -13,6 +14,9 @@ class EspaceApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: espaceLightTheme,
       routerConfig: appRouter,
+      localizationsDelegates: const [
+        FlutterQuillLocalizations.delegate,
+      ],
     );
   }
 }
