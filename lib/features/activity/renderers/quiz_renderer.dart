@@ -266,11 +266,16 @@ class _QuizViewState extends State<_QuizView> {
       }
     }
 
+    // Moodle returns nextpage/previouspage at the top level of the
+    // get_attempt_data response, NOT inside the attempt object.
+    final nextpage = _asInt(data['nextpage'] ?? attempt['nextpage']);
+    final prevpage = _asInt(data['previouspage'] ?? attempt['previouspage']);
+
     setState(() {
       _attemptData = data;
       _currentPage = _asInt(attempt['currentpage']) ?? page;
-      _hasPrevPage = (_asInt(attempt['previouspage']) ?? -1) >= 0;
-      _hasNextPage = (_asInt(attempt['nextpage']) ?? -1) >= 0;
+      _hasPrevPage = (prevpage ?? -1) >= 0;
+      _hasNextPage = (nextpage ?? -1) >= 0;
       _reviewMode = false;
 
       if (timeLeft != null && timeLeft > 0) {
@@ -302,9 +307,8 @@ class _QuizViewState extends State<_QuizView> {
           .toList();
       _questionsByPage[page] = parsed;
       await _ensureControllers(parsed);
-      final attempt =
-          Map<String, dynamic>.from(data['attempt'] as Map? ?? const {});
-      hasNext = (_asInt(attempt['nextpage']) ?? -1) >= 0;
+      // Moodle returns nextpage at the top level of the response.
+      hasNext = (_asInt(data['nextpage']) ?? -1) >= 0;
     }
   }
 

@@ -204,19 +204,23 @@ class _EspaceRichTextFieldState extends State<EspaceRichTextField> {
                 minHeight: widget.minHeight,
                 maxHeight: widget.maxHeight,
               ),
-              child: QuillEditor.basic(
-                controller: widget.controller,
-                focusNode: _focusNode,
-                scrollController: _scrollController,
-                config: QuillEditorConfig(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                  placeholder: widget.hintText,
-                  embedBuilders: FlutterQuillEmbeds.defaultEditorBuilders(),
-                  scrollable: true,
-                  autoFocus: widget.autofocus,
-                  expands: false,
+                child: QuillEditor.basic(
+                  controller: widget.controller,
+                  focusNode: _focusNode,
+                  scrollController: _scrollController,
+                  config: QuillEditorConfig(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                    placeholder: widget.hintText,
+                    embedBuilders: FlutterQuillEmbeds.defaultEditorBuilders(),
+                    scrollable: true,
+                    // Autofocus is handled once in initState via _focusNode.requestFocus().
+                    // Setting autoFocus: false prevents the Quill editor from re-requesting
+                    // focus on every parent rebuild, which was causing the cursor to jump
+                    // from option/answer fields back to the question stem.
+                    autoFocus: false,
+                    expands: false,
+                  ),
                 ),
-              ),
             ),
             if (_liveHtml.contains(r'\(') || _liveHtml.contains(r'\[')) ...[
               Divider(height: 1, color: Colors.grey.shade200),
