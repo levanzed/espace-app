@@ -140,6 +140,10 @@ class QuizQuestionDraft {
     List<McqChoiceDraft>? choices,
     List<ShortAnswerEntryDraft>? answers,
     this.caseSensitive = false,
+    this.generalFeedback = '',
+    this.correctFeedback = '',
+    this.incorrectFeedback = '',
+    this.partiallyCorrectFeedback = '',
   })  : id = id ?? newQuizDraftId(),
         choices = choices ?? [],
         answers = answers ?? [];
@@ -151,6 +155,13 @@ class QuizQuestionDraft {
   List<McqChoiceDraft> choices;
   List<ShortAnswerEntryDraft> answers;
   bool caseSensitive;
+
+  /// Rich-text (HTML) feedback shown after grading. LaTeX `\( … \)` renders
+  /// via the shared LatexHtmlContent pipeline on every surface.
+  String generalFeedback;
+  String correctFeedback;
+  String incorrectFeedback;
+  String partiallyCorrectFeedback;
 
   String get typeApi => type == QuizQuestionType.multipleChoice
       ? 'multiple_choice'
@@ -168,6 +179,10 @@ class QuizQuestionDraft {
           .map((a) => ShortAnswerEntryDraft(text: a.text, fraction: a.fraction))
           .toList(),
       caseSensitive: caseSensitive,
+      generalFeedback: generalFeedback,
+      correctFeedback: correctFeedback,
+      incorrectFeedback: incorrectFeedback,
+      partiallyCorrectFeedback: partiallyCorrectFeedback,
     );
   }
 
@@ -186,6 +201,23 @@ class QuizQuestionDraft {
       map['answers'] = answers.map((a) => a.toJson()).toList();
       map['case_sensitive'] = caseSensitive;
     }
+    // Feedback is additive — only include non-empty fields so the publish
+    // payload stays backward compatible with older local_espace versions.
+    if (generalFeedback.trim().isNotEmpty) {
+      map['general_feedback'] = {'format': 'html', 'text': generalFeedback};
+    }
+    if (correctFeedback.trim().isNotEmpty) {
+      map['correct_feedback'] = {'format': 'html', 'text': correctFeedback};
+    }
+    if (incorrectFeedback.trim().isNotEmpty) {
+      map['incorrect_feedback'] = {'format': 'html', 'text': incorrectFeedback};
+    }
+    if (partiallyCorrectFeedback.trim().isNotEmpty) {
+      map['partially_correct_feedback'] = {
+        'format': 'html',
+        'text': partiallyCorrectFeedback,
+      };
+    }
     return map;
   }
 
@@ -197,6 +229,10 @@ class QuizQuestionDraft {
         'choices': choices.map((c) => c.toDraftJson()).toList(),
         'answers': answers.map((a) => a.toJson()).toList(),
         'caseSensitive': caseSensitive,
+        'generalFeedback': generalFeedback,
+        'correctFeedback': correctFeedback,
+        'incorrectFeedback': incorrectFeedback,
+        'partiallyCorrectFeedback': partiallyCorrectFeedback,
       };
 
   factory QuizQuestionDraft.fromDraftJson(Map<String, dynamic> json) {
@@ -226,6 +262,11 @@ class QuizQuestionDraft {
           .toList(),
       caseSensitive:
           json['caseSensitive'] == true || json['case_sensitive'] == true,
+      generalFeedback: json['generalFeedback']?.toString() ?? '',
+      correctFeedback: json['correctFeedback']?.toString() ?? '',
+      incorrectFeedback: json['incorrectFeedback']?.toString() ?? '',
+      partiallyCorrectFeedback:
+          json['partiallyCorrectFeedback']?.toString() ?? '',
     );
   }
 

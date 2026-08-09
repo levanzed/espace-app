@@ -147,18 +147,35 @@ class ActivityRepository {
     return Map<String, dynamic>.from(response.data as Map);
   }
 
+  /// Save the current page's answers without finishing.
+  Future<Map<String, dynamic>> saveQuizAttempt(
+    int cmid,
+    int attemptId, {
+    List<Map<String, dynamic>> data = const [],
+  }) async {
+    final response = await _api.post(
+      '/activity/$cmid/quiz/attempts/$attemptId/save',
+      data: {
+        'data': data,
+      },
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Process the attempt. [timeup]=1 tells Moodle the student ran out of time.
   Future<Map<String, dynamic>> processQuizAttempt(
     int cmid,
     int attemptId, {
     List<Map<String, dynamic>> data = const [],
     int finishattempt = 0,
+    int timeup = 0,
   }) async {
     final response = await _api.post(
       '/activity/$cmid/quiz/attempts/$attemptId/process',
       data: {
         'data': data,
         'finishattempt': finishattempt,
-        'timeup': 0,
+        'timeup': timeup,
       },
     );
     return Map<String, dynamic>.from(response.data as Map);

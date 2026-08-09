@@ -28,6 +28,14 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
   late final QuillController _stemController;
   late final TextEditingController _mark;
   late List<TextEditingController> _options;
+  // One FocusNode per option/answer field so typing LaTeX in an accepted
+  // answer never loses focus back to the autofocused question stem.
+  late List<FocusNode> _optionFocusNodes;
+  // Rich-text feedback fields (LaTeX `\( … \)` renders everywhere).
+  late final QuillController _generalFeedback;
+  late final QuillController _correctFeedback;
+  late final QuillController _incorrectFeedback;
+  late final QuillController _partiallyCorrectFeedback;
   int _correctIndex = 0;
   bool _caseSensitive = false;
   String? _localError;
@@ -41,6 +49,14 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     _stemController = EspaceRichTextField.controllerFromHtml(e?.stem);
     _mark = TextEditingController(text: (e?.mark ?? 1.0).toString());
     _caseSensitive = e?.caseSensitive ?? false;
+    _generalFeedback =
+        EspaceRichTextField.controllerFromHtml(e?.generalFeedback);
+    _correctFeedback =
+        EspaceRichTextField.controllerFromHtml(e?.correctFeedback);
+    _incorrectFeedback =
+        EspaceRichTextField.controllerFromHtml(e?.incorrectFeedback);
+    _partiallyCorrectFeedback =
+        EspaceRichTextField.controllerFromHtml(e?.partiallyCorrectFeedback);
 
     if (_isMcq) {
       if (e != null && e.choices.isNotEmpty) {
@@ -59,20 +75,32 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
         _options = [TextEditingController()];
       }
     }
+    _optionFocusNodes =
+        List.generate(_options.length, (_) => FocusNode(debugLabel: 'option'));
   }
 
   @override
   void dispose() {
     _stemController.dispose();
     _mark.dispose();
+    _generalFeedback.dispose();
+    _correctFeedback.dispose();
+    _incorrectFeedback.dispose();
+    _partiallyCorrectFeedback.dispose();
     for (final c in _options) {
       c.dispose();
+    }
+    for (final f in _optionFocusNodes) {
+      f.dispose();
     }
     super.dispose();
   }
 
   void _addOption() {
-    setState(() => _options.add(TextEditingController()));
+    setState(() {
+      _options.add(TextEditingController());
+      _optionFocusNodes.add(FocusNode(debugLabel: 'option'));
+    });
   }
 
   void _removeOption(int index) {
@@ -81,6 +109,8 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
     setState(() {
       _options[index].dispose();
       _options.removeAt(index);
+      _optionFocusNodes[index].dispose();
+      _optionFocusNodes.removeAt(index);
       if (_correctIndex >= _options.length) {
         _correctIndex = _options.length - 1;
       }
@@ -93,6 +123,11 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
       return;
     }
     final stem = EspaceRichTextField.htmlOf(_stemController);
+    final generalFeedback = EspaceRichTextField.htmlOf(_generalFeedback);
+    final correctFeedback = EspaceRichTextField.htmlOf(_correctFeedback);
+    final incorrectFeedback = EspaceRichTextField.htmlOf(_incorrectFeedback);
+    final partiallyCorrectFeedback =
+        EspaceRichTextField.htmlOf(_partiallyCorrectFeedback);
 
     final mark = double.tryParse(_mark.text.trim()) ?? 0;
     if (mark <= 0) {
@@ -131,6 +166,10 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
           mark: mark,
           stem: stem,
           choices: filled,
+          generalFeedback: generalFeedback,
+          correctFeedback: correctFeedback,
+          incorrectFeedback: incorrectFeedback,
+          partiallyCorrectFeedback: partiallyCorrectFeedback,
         ),
       );
       return;
@@ -154,6 +193,10 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
         stem: stem,
         answers: answers,
         caseSensitive: _caseSensitive,
+        generalFeedback: generalFeedback,
+        correctFeedback: correctFeedback,
+        incorrectFeedback: incorrectFeedback,
+        partiallyCorrectFeedback: partiallyCorrectFeedback,
       ),
     );
   }
@@ -236,6 +279,7 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
                               Expanded(
                                 child: TextField(
                                   controller: _options[index],
+                                  focusNode: _optionFocusNodes[index],
                                   decoration: InputDecoration(
                                     hintText: 'Choice ${index + 1}',
                                     border: InputBorder.none,
@@ -280,6 +324,7 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
                         Expanded(
                           child: TextField(
                             controller: _options[index],
+                            focusNode: _optionFocusNodes[index],
                             decoration: InputDecoration(
                               hintText: 'Answer ${index + 1}',
                               border: InputBorder.none,
@@ -317,8 +362,70 @@ class _QuizQuestionEditorScreenState extends State<QuizQuestionEditorScreen> {
               onChanged: (v) => setState(() => _caseSensitive = v),
             ),
           ],
+          const SizedBox(height: 28),
+          const _SectionLabel(
+            label: 'Feedback',
+            hint: 'Shown after grading. LaTeX (\\( … \\)) renders everywhere.',
+          ),
+          const SizedBox(height: 12),
+          _FeedbackField(
+            label: 'General feedback',
+            controller: _generalFeedback,
+          ),
+          const SizedBox(height: 12),
+          _FeedbackField(
+            label: 'Correct feedback',
+            controller: _correctFeedback,
+          ),
+          const SizedBox(height: 12),
+          _FeedbackField(
+            label: 'Incorrect feedback',
+            controller: _incorrectFeedback,
+          ),
+          const SizedBox(height: 12),
+          _FeedbackField(
+            label: 'Partially correct feedback',
+            controller: _partiallyCorrectFeedback,
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _FeedbackField extends StatelessWidget {
+  const _FeedbackField({required this.label, required this.controller});
+
+  final String label;
+  final QuillController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: EspaceRichTextField(
+              controller: controller,
+              hintText: 'Optional feedback…',
+              minHeight: 60,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

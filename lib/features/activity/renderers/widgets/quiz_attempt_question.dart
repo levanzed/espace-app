@@ -19,6 +19,7 @@ class ParsedQuizQuestion {
     this.number,
     this.status,
     this.maxMark,
+    this.initialAnswer,
   });
 
   final int slot;
@@ -31,6 +32,9 @@ class ParsedQuizQuestion {
   final String? number;
   final String? status;
   final String? maxMark;
+
+  /// Previously saved answer for this question (from Moodle HTML on resume).
+  final String? initialAnswer;
 
   bool get isMultichoice => type == 'multichoice' && choices.isNotEmpty;
   bool get isShortAnswer =>
@@ -60,6 +64,7 @@ class ParsedQuizQuestion {
       number: raw['number']?.toString() ?? raw['questionnumber']?.toString(),
       status: raw['status']?.toString() ?? raw['state']?.toString(),
       maxMark: raw['maxmark']?.toString(),
+      initialAnswer: _extractInitialAnswer(cleaned, type),
     );
   }
 
@@ -80,52 +85,50 @@ class ParsedQuizQuestion {
 }
 
 class QuizChoiceOption {
-  const QuizChoiceOption({required this.value, required this.label});
+  const QuizChoiceOption({required this.value, required this.labelHtml});
 
   final String value;
-  final String label;
+
+  /// Raw HTML label so LaTeX (`\( … \)`) renders via [HtmlContent].
+  final String labelHtml;
 }
 
 /// Native MCQ / short-answer controls for one Moodle quiz question.
-class QuizAttemptQuestionCard extends StatefulWidget {
+///
+/// [controller] is owned by the parent ([QuizRenderer]) so the short-answer
+/// cursor/state survives page navigation (fixes cursor jumping back to the
+/// question stem). [initialValue] seeds MCQ selection on resume/page-back.
+class QuizAttemptQuestionCard extends StatelessWidget {
   const QuizAttemptQuestionCard({
     super.key,
     required this.question,
     required this.onAnswerChanged,
+    this.initialValue,
+    this.controller,
+    this.showAnswerStatus = false,
   });
 
   final ParsedQuizQuestion question;
   final ValueChanged<String?> onAnswerChanged;
 
-  @override
-  State<QuizAttemptQuestionCard> createState() =>
-      _QuizAttemptQuestionCardState();
-}
+  /// Cached answer (from the controller's `_answers` map) to restore UI state
+  /// when navigating back to a page.
+  final String? initialValue;
 
-class _QuizAttemptQuestionCardState extends State<QuizAttemptQuestionCard> {
-  String? _selectedValue;
-  late final TextEditingController _textController;
+  /// External controller for short-answer — preserves cursor position across
+  /// rebuilds and page changes.
+  final TextEditingController? controller;
 
-  @override
-  void initState() {
-    super.initState();
-    _textController = TextEditingController();
-    _textController.addListener(() {
-      widget.onAnswerChanged(
-        _textController.text.trim().isEmpty ? null : _textController.text,
-      );
-    });
-  }
+  /// When true, renders an answered / unanswered badge (review mode).
+  final bool showAnswerStatus;
 
-  @override
-  void dispose() {
-    _textController.dispose();
-    super.dispose();
-  }
+  bool get _answered =>
+      (initialValue != null && initialValue!.isNotEmpty) ||
+      ((controller?.text.trim().isEmpty ?? true) == false);
 
   @override
   Widget build(BuildContext context) {
-    final q = widget.question;
+    final q = question;
     final theme = Theme.of(context);
 
     return Card(
@@ -135,9 +138,19 @@ class _QuizAttemptQuestionCardState extends State<QuizAttemptQuestionCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Question ${q.number ?? q.slot}',
-              style: theme.textTheme.titleMedium,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Question ${q.number ?? q.slot}',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                if (showAnswerStatus) ...[
+                  const SizedBox(width: 8),
+                  _AnswerStatusBadge(answered: _answered),
+                ],
+              ],
             ),
             if (q.status != null || q.maxMark != null) ...[
               const SizedBox(height: 4),
@@ -156,10 +169,9 @@ class _QuizAttemptQuestionCardState extends State<QuizAttemptQuestionCard> {
             const SizedBox(height: 12),
             if (q.isMultichoice)
               RadioGroup<String>(
-                groupValue: _selectedValue,
+                groupValue: initialValue,
                 onChanged: (value) {
-                  setState(() => _selectedValue = value);
-                  widget.onAnswerChanged(value);
+                  onAnswerChanged(value);
                 },
                 child: Column(
                   children: [
@@ -167,7 +179,7 @@ class _QuizAttemptQuestionCardState extends State<QuizAttemptQuestionCard> {
                       RadioListTile<String>(
                         contentPadding: EdgeInsets.zero,
                         dense: true,
-                        title: Text(choice.label),
+                        title: HtmlContent(html: choice.labelHtml),
                         value: choice.value,
                       ),
                   ],
@@ -175,10 +187,11 @@ class _QuizAttemptQuestionCardState extends State<QuizAttemptQuestionCard> {
               )
             else if (q.isShortAnswer)
               TextField(
-                controller: _textController,
+                controller: controller,
                 decoration: const InputDecoration(
                   labelText: 'Answer',
                   border: OutlineInputBorder(),
+                  helperText: r'LaTeX (\ ( … \) ) renders in review',
                 ),
                 textInputAction: TextInputAction.done,
               )
@@ -191,6 +204,43 @@ class _QuizAttemptQuestionCardState extends State<QuizAttemptQuestionCard> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AnswerStatusBadge extends StatelessWidget {
+  const _AnswerStatusBadge({required this.answered});
+
+  final bool answered;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = answered ? const Color(0xFF2E7D4F) : const Color(0xFFB26A00);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            answered ? Icons.check_circle_outline : Icons.error_outline,
+            size: 15,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            answered ? 'Answered' : 'Unanswered',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -250,6 +300,25 @@ String? _extractAnswerFieldName(String html, String type) {
   return null;
 }
 
+/// Extract the previously-submitted answer value from Moodle's HTML so a
+/// resumed attempt restores the student's saved answers.
+String? _extractInitialAnswer(String html, String type) {
+  if (type == 'shortanswer') {
+    return _matchAttr(
+      html,
+      r'<input[^>]*type="text"[^>]*name="q\d+:\d+_answer"[^>]*value="([^"]*)"',
+    );
+  }
+  if (type == 'multichoice') {
+    // Checked radio → its value is the saved answer.
+    return _matchAttr(
+      html,
+      r'<input[^>]*type="radio"[^>]*name="q\d+:\d+_answer"[^>]*value="(-?\d+)"[^>]*checked',
+    );
+  }
+  return null;
+}
+
 List<QuizChoiceOption> _extractChoices(String html) {
   final choices = <QuizChoiceOption>[];
   final radioPattern = RegExp(
@@ -269,25 +338,19 @@ List<QuizChoiceOption> _extractChoices(String html) {
       caseSensitive: false,
     ).firstMatch(after);
 
-    var label = '';
+    var labelHtml = '';
     if (labelMatch != null) {
       final number = (labelMatch.group(1) ?? '').trim();
-      final text = _stripTags(labelMatch.group(2) ?? '').trim();
-      label = [number, text].where((part) => part.isNotEmpty).join(' ');
+      // Keep raw inner HTML so LaTeX renders via HtmlContent.
+      final text = (labelMatch.group(2) ?? '').trim();
+      labelHtml = [number, text].where((p) => p.isNotEmpty).join(' ');
     }
-    if (label.isEmpty) {
-      label = 'Option ${choices.length + 1}';
+    if (labelHtml.isEmpty) {
+      labelHtml = 'Option ${choices.length + 1}';
     }
 
-    choices.add(QuizChoiceOption(value: value, label: label));
+    choices.add(QuizChoiceOption(value: value, labelHtml: labelHtml));
   }
 
   return choices;
-}
-
-String _stripTags(String html) {
-  return html
-      .replaceAll(RegExp(r'<[^>]+>'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
 }
