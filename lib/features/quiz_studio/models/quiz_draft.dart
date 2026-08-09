@@ -71,7 +71,9 @@ class ShortAnswerEntryDraft {
 
 enum QuizQuestionType { multipleChoice, shortAnswer }
 
-/// Local-only quiz settings (Phase 1B). Not sent on publish until Phase 2.
+/// Quiz settings for Studio authoring.
+///
+/// Sent on publish via `payload.settings` (local_espace 1.1.15+).
 class QuizSettingsDraft {
   QuizSettingsDraft({
     this.timeLimitSeconds = 0,
@@ -81,6 +83,7 @@ class QuizSettingsDraft {
     this.gradeToPass = 0,
     this.timeOpen,
     this.timeClose,
+    this.questionsPerPage = 0,
   });
 
   /// 0 = no limit.
@@ -94,6 +97,9 @@ class QuizSettingsDraft {
   DateTime? timeOpen;
   DateTime? timeClose;
 
+  /// 0 = all questions on one page; otherwise questions per page.
+  int questionsPerPage;
+
   Map<String, dynamic> toJson() => {
         'timeLimitSeconds': timeLimitSeconds,
         'attemptsAllowed': attemptsAllowed,
@@ -102,6 +108,7 @@ class QuizSettingsDraft {
         'gradeToPass': gradeToPass,
         'timeOpen': timeOpen?.toIso8601String(),
         'timeClose': timeClose?.toIso8601String(),
+        'questionsPerPage': questionsPerPage,
       };
 
   factory QuizSettingsDraft.fromJson(Map<String, dynamic>? json) {
@@ -114,6 +121,7 @@ class QuizSettingsDraft {
       gradeToPass: (json['gradeToPass'] as num?)?.toDouble() ?? 0,
       timeOpen: _parseDate(json['timeOpen']),
       timeClose: _parseDate(json['timeClose']),
+      questionsPerPage: (json['questionsPerPage'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -293,7 +301,8 @@ class QuizDraft {
         s.shuffleAnswers &&
         s.gradeToPass <= 0 &&
         s.timeOpen == null &&
-        s.timeClose == null;
+        s.timeClose == null &&
+        s.questionsPerPage <= 0;
     if (allDefaults) return null;
 
     return {
@@ -308,9 +317,7 @@ class QuizDraft {
       'timeclose': s.timeClose != null
           ? s.timeClose!.millisecondsSinceEpoch ~/ 1000
           : 0,
-      // Studio publishes a complete quiz on one page; keep default unless
-      // explicitly configured later.
-      'questionsperpage': 0,
+      'questionsperpage': s.questionsPerPage,
     };
   }
 

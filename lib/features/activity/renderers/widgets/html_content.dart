@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 
+import '../../../../core/rich_text/latex_html_content.dart';
+
+/// Shared HTML renderer for all ESPACE surfaces.
+///
+/// Renders LaTeX math (`\( ... \)` inline, `\[ ... \]` display) via
+/// [LatexHtmlContent] so equations render identically in teacher preview,
+/// student attempt, quiz review, and the activity renderer.
 class HtmlContent extends StatelessWidget {
   final String html;
 
@@ -15,8 +21,8 @@ class HtmlContent extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return HtmlWidget(
-      html,
+    return LatexHtmlContent(
+      html: html,
       textStyle: Theme.of(context).textTheme.bodyLarge,
     );
   }

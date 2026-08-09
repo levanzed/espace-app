@@ -79,17 +79,27 @@ class QuizQuestionCard extends StatelessWidget {
                                   : Icons.short_text_rounded,
                             ),
                             const Spacer(),
-                            Text(
-                              '${_formatMark(question.mark)} pt',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.grey.shade600,
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '${_formatMark(question.mark)} pt',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.grey.shade700,
+                                ),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 12),
                         Text(
                           stemPreview,
                           maxLines: 3,
@@ -97,7 +107,7 @@ class QuizQuestionCard extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            height: 1.35,
+                            height: 1.4,
                             color: stem.isEmpty
                                 ? Colors.grey.shade400
                                 : const Color(0xFF1A1A1A),
@@ -143,19 +153,30 @@ class QuizQuestionCard extends StatelessWidget {
                     .where((c) => c.text.trim().isNotEmpty)
                     .map(
                       (c) => Padding(
-                        padding: const EdgeInsets.only(left: 52, bottom: 6),
+                        padding: const EdgeInsets.only(left: 52, bottom: 8),
                         child: Row(
                           children: [
-                            Icon(
-                              c.correct
-                                  ? Icons.check_circle_rounded
-                                  : Icons.circle_outlined,
-                              size: 18,
-                              color: c.correct
-                                  ? const Color(0xFF2E7D4F)
-                                  : Colors.grey.shade400,
+                            Container(
+                              width: 22,
+                              height: 22,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: c.correct
+                                    ? const Color(0xFF2E7D4F).withValues(alpha: 0.12)
+                                    : Colors.grey.shade100,
+                              ),
+                              child: Icon(
+                                c.correct
+                                    ? Icons.check_rounded
+                                    : Icons.circle_outlined,
+                                size: 14,
+                                color: c.correct
+                                    ? const Color(0xFF2E7D4F)
+                                    : Colors.grey.shade400,
+                              ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 c.text.trim(),
@@ -163,6 +184,7 @@ class QuizQuestionCard extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontSize: 14,
+                                  height: 1.3,
                                   color: c.correct
                                       ? const Color(0xFF1A1A1A)
                                       : Colors.grey.shade700,
